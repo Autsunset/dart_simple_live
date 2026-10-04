@@ -1,5 +1,7 @@
 import java.util.Properties
 import java.io.FileInputStream
+import com.android.build.api.instrumentation.FramesComputationMode
+import com.android.build.api.instrumentation.InstrumentationScope
 
 plugins {
     id("com.android.application")
@@ -67,4 +69,18 @@ android {
 
 flutter {
     source = "../.."
+}
+
+// Flutter 3.44.0 leaves video SyncFence FDs open until Java GC (flutter#188161).
+// Backport flutter#188313 to both affected embedding classes in this APK.
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.instrumentation.transformClassesWith(
+            CloseSyncFenceVisitorFactory::class.java,
+            InstrumentationScope.ALL
+        ) {}
+        variant.instrumentation.setAsmFramesComputationMode(
+            FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS
+        )
+    }
 }

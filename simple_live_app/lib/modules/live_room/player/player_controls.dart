@@ -19,16 +19,10 @@ import 'package:simple_live_app/widgets/superchat_card.dart';
 import 'dart:async';
 import 'package:simple_live_core/simple_live_core.dart';
 
-Widget playerControls(
-  VideoState videoState,
-  LiveRoomController controller,
-) {
+Widget playerControls(VideoState videoState, LiveRoomController controller) {
   return Obx(() {
     if (controller.fullScreenState.value) {
-      return buildFullControls(
-        videoState,
-        controller,
-      );
+      return buildFullControls(videoState, controller);
     }
     return buildControls(
       videoState.context.orientation == Orientation.portrait,
@@ -38,10 +32,7 @@ Widget playerControls(
   });
 }
 
-Widget buildFullControls(
-  VideoState videoState,
-  LiveRoomController controller,
-) {
+Widget buildFullControls(VideoState videoState, LiveRoomController controller) {
   var padding = MediaQuery.of(videoState.context).padding;
   GlobalKey volumeButtonkey = GlobalKey();
   return DragToMoveArea(
@@ -53,7 +44,8 @@ Widget buildFullControls(
         // 左下角SC显示
         Obx(
           () => Visibility(
-            visible: AppSettingsController.instance.playershowSuperChat.value &&
+            visible:
+                AppSettingsController.instance.playershowSuperChat.value &&
                 ((!Platform.isAndroid && !Platform.isIOS) ||
                     controller.fullScreenState.value),
             child: Positioned(
@@ -66,14 +58,12 @@ Widget buildFullControls(
 
         Center(
           child: // 中间
-              StreamBuilder(
+          StreamBuilder(
             stream: videoState.widget.controller.player.stream.buffering,
             initialData: videoState.widget.controller.player.state.buffering,
             builder: (_, s) => Visibility(
               visible: s.data ?? false,
-              child: const Center(
-                child: CircularProgressIndicator(),
-              ),
+              child: const Center(child: CircularProgressIndicator()),
             ),
           ),
         ),
@@ -118,7 +108,8 @@ Widget buildFullControls(
           () => AnimatedPositioned(
             left: 0,
             right: 0,
-            top: (controller.showControlsState.value &&
+            top:
+                (controller.showControlsState.value &&
                     !controller.lockControlsState.value)
                 ? 0
                 : -(48 + padding.top),
@@ -134,10 +125,7 @@ Widget buildFullControls(
                 gradient: LinearGradient(
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
-                  colors: [
-                    Colors.transparent,
-                    Colors.black87,
-                  ],
+                  colors: [Colors.transparent, Colors.black87],
                 ),
               ),
               child: Row(
@@ -219,7 +207,8 @@ Widget buildFullControls(
           () => AnimatedPositioned(
             left: 0,
             right: 0,
-            bottom: (controller.showControlsState.value &&
+            bottom:
+                (controller.showControlsState.value &&
                     !controller.lockControlsState.value)
                 ? 0
                 : -(80 + padding.bottom),
@@ -229,10 +218,7 @@ Widget buildFullControls(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    Colors.black87,
-                  ],
+                  colors: [Colors.transparent, Colors.black87],
                 ),
               ),
               padding: EdgeInsets.only(
@@ -246,10 +232,7 @@ Widget buildFullControls(
                     onPressed: () {
                       controller.refreshRoom();
                     },
-                    icon: const Icon(
-                      Remix.refresh_line,
-                      color: Colors.white,
-                    ),
+                    icon: const Icon(Remix.refresh_line, color: Colors.white),
                   ),
                   Offstage(
                     offstage: controller.showDanmakuState.value,
@@ -290,8 +273,10 @@ Widget buildFullControls(
                       padding: const EdgeInsets.only(left: 8.0),
                       child: Text(
                         controller.liveDuration.value,
-                        style:
-                            const TextStyle(fontSize: 14, color: Colors.white),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ),
@@ -301,8 +286,9 @@ Widget buildFullControls(
                     child: IconButton(
                       key: volumeButtonkey,
                       onPressed: () {
-                        controller
-                            .showVolumeSlider(volumeButtonkey.currentContext!);
+                        controller.showVolumeSlider(
+                          volumeButtonkey.currentContext!,
+                        );
                       },
                       icon: const Icon(
                         Icons.volume_down,
@@ -318,8 +304,10 @@ Widget buildFullControls(
                     child: Obx(
                       () => Text(
                         controller.currentQualityInfo.value,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 15),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                        ),
                       ),
                     ),
                   ),
@@ -439,7 +427,8 @@ Widget buildControls(
       // 左下角SC显示
       Obx(
         () => Visibility(
-          visible: AppSettingsController.instance.playershowSuperChat.value &&
+          visible:
+              AppSettingsController.instance.playershowSuperChat.value &&
               ((!Platform.isAndroid && !Platform.isIOS) ||
                   controller.fullScreenState.value),
           child: Positioned(
@@ -457,9 +446,7 @@ Widget buildControls(
           initialData: videoState.widget.controller.player.state.buffering,
           builder: (_, s) => Visibility(
             visible: s.data ?? false,
-            child: const Center(
-              child: CircularProgressIndicator(),
-            ),
+            child: const Center(child: CircularProgressIndicator()),
           ),
         ),
       ),
@@ -492,10 +479,7 @@ Widget buildControls(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  Colors.black87,
-                ],
+                colors: [Colors.transparent, Colors.black87],
               ),
             ),
             child: Row(
@@ -504,10 +488,7 @@ Widget buildControls(
                   onPressed: () {
                     controller.refreshRoom();
                   },
-                  icon: const Icon(
-                    Remix.refresh_line,
-                    color: Colors.white,
-                  ),
+                  icon: const Icon(Remix.refresh_line, color: Colors.white),
                 ),
                 Offstage(
                   offstage: controller.showDanmakuState.value,
@@ -578,8 +559,10 @@ Widget buildControls(
                     child: Obx(
                       () => Text(
                         controller.currentQualityInfo.value,
-                        style:
-                            const TextStyle(color: Colors.white, fontSize: 15),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                        ),
                       ),
                     ),
                   ),
@@ -613,10 +596,7 @@ Widget buildControls(
                   onPressed: () {
                     controller.enterFullScreen();
                   },
-                  icon: const Icon(
-                    Remix.fullscreen_line,
-                    color: Colors.white,
-                  ),
+                  icon: const Icon(Remix.fullscreen_line, color: Colors.white),
                 ),
               ],
             ),
@@ -699,22 +679,19 @@ void showLinesInfo(LiveRoomController controller) {
               text: "线路${i + 1}",
               children: [
                 WidgetSpan(
-                    child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: AppStyle.radius4,
-                    border: Border.all(
-                      color: Colors.grey,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: AppStyle.radius4,
+                      border: Border.all(color: Colors.grey),
+                    ),
+                    padding: AppStyle.edgeInsetsH4,
+                    margin: AppStyle.edgeInsetsL8,
+                    child: Text(
+                      controller.playUrls[i].contains(".flv") ? "FLV" : "HLS",
+                      style: const TextStyle(fontSize: 12),
                     ),
                   ),
-                  padding: AppStyle.edgeInsetsH4,
-                  margin: AppStyle.edgeInsetsL8,
-                  child: Text(
-                    controller.playUrls[i].contains(".flv") ? "FLV" : "HLS",
-                    style: const TextStyle(
-                      fontSize: 12,
-                    ),
-                  ),
-                )),
+                ),
               ],
             ),
             style: const TextStyle(fontSize: 14),
@@ -747,10 +724,7 @@ void showQualitesInfo(LiveRoomController controller) {
         var item = controller.qualites[i];
         return ListTile(
           selected: controller.currentQuality == i,
-          title: Text(
-            item.quality,
-            style: const TextStyle(fontSize: 14),
-          ),
+          title: Text(item.quality, style: const TextStyle(fontSize: 14)),
           minLeadingWidth: 16,
           onTap: () {
             Utils.hideRightDialog();
@@ -775,9 +749,7 @@ void showDanmakuSettings(LiveRoomController controller) {
     child: ListView(
       padding: AppStyle.edgeInsetsA12,
       children: [
-        DanmuSettingsView(
-          danmakuController: controller.danmakuController,
-        ),
+        DanmuSettingsView(danmakuController: controller.danmakuController),
       ],
     ),
   );
@@ -804,10 +776,7 @@ void showPlayerSettings(LiveRoomController controller) {
           children: [
             Padding(
               padding: AppStyle.edgeInsetsH16,
-              child: Text(
-                "画面尺寸",
-                style: Get.textTheme.titleMedium,
-              ),
+              child: Text("画面尺寸", style: Get.textTheme.titleMedium),
             ),
             const RadioListTile(
               value: 0,
@@ -868,7 +837,8 @@ void showFollowUser(LiveRoomController controller) {
                 return Obx(
                   () => FollowUserItem(
                     item: item,
-                    playing: controller.rxSite.value.id == item.siteId &&
+                    playing:
+                        controller.rxSite.value.id == item.siteId &&
                         controller.rxRoomId.value == item.roomId,
                     onTap: () {
                       Utils.hideRightDialog();
@@ -903,12 +873,12 @@ class PlayerSuperChatCard extends StatefulWidget {
   final LiveSuperChatMessage message;
   final VoidCallback onExpire;
   final int duration;
-  const PlayerSuperChatCard(
-      {required this.message,
-      required this.onExpire,
-      required this.duration,
-      Key? key})
-      : super(key: key);
+  const PlayerSuperChatCard({
+    required this.message,
+    required this.onExpire,
+    required this.duration,
+    Key? key,
+  }) : super(key: key);
   @override
   State<PlayerSuperChatCard> createState() => _PlayerSuperChatCardState();
 }
@@ -952,7 +922,7 @@ class _PlayerSuperChatCardState extends State<PlayerSuperChatCard> {
 }
 
 class LocalDisplaySC {
-  final LiveSuperChatMessage sc;
+  LiveSuperChatMessage sc;
   final DateTime expireAt;
   final int duration;
   LocalDisplaySC(this.sc, this.expireAt, this.duration);
@@ -961,7 +931,7 @@ class LocalDisplaySC {
 class PlayerSuperChatOverlay extends StatefulWidget {
   final LiveRoomController controller;
   const PlayerSuperChatOverlay({required this.controller, Key? key})
-      : super(key: key);
+    : super(key: key);
   @override
   State<PlayerSuperChatOverlay> createState() => _PlayerSuperChatOverlayState();
 }
@@ -969,11 +939,18 @@ class PlayerSuperChatOverlay extends StatefulWidget {
 class _PlayerSuperChatOverlayState extends State<PlayerSuperChatOverlay> {
   final List<LocalDisplaySC> _displayed = [];
   final Map<LocalDisplaySC, Timer> _timers = {};
+  final Set<String> _seen = {};
   late Worker _worker;
 
   void _addSC(LiveSuperChatMessage sc, {int? customSeconds}) {
-    if (_displayed.any((e) => e.sc == sc)) return;
-    int showSeconds = customSeconds ?? 15;
+    if (!_seen.add(sc.key)) return;
+    final remaining = sc.endTime.difference(DateTime.now()).inSeconds;
+    if (remaining <= 0) return;
+    int showSeconds = customSeconds ?? (remaining < 15 ? remaining : 15);
+    if (_displayed.length >= 3) {
+      final removed = _displayed.removeAt(0);
+      _timers.remove(removed)?.cancel();
+    }
     final expireAt = DateTime.now().add(Duration(seconds: showSeconds));
     final localSC = LocalDisplaySC(sc, expireAt, showSeconds);
     _displayed.add(localSC);
@@ -998,16 +975,22 @@ class _PlayerSuperChatOverlayState extends State<PlayerSuperChatOverlay> {
       }
     }
     // 监听SC列表变化
-    _worker =
-        ever<List<LiveSuperChatMessage>>(widget.controller.superChats, (list) {
-      // 新增
-      for (var sc in list) {
-        if (!_displayed.any((e) => e.sc == sc)) {
-          _addSC(sc);
-        }
+    _worker = ever<List<LiveSuperChatMessage>>(widget.controller.superChats, (
+      list,
+    ) {
+      final activeKeys = list.map((sc) => sc.key).toSet();
+      _seen.removeWhere((key) => !activeKeys.contains(key));
+      for (final removed
+          in _displayed.where((e) => !activeKeys.contains(e.sc.key)).toList()) {
+        _displayed.remove(removed);
+        _timers.remove(removed)?.cancel();
       }
-      // 移除
-      _displayed.removeWhere((e) => !list.contains(e.sc));
+      for (var sc in list) {
+        for (final displayed in _displayed) {
+          if (displayed.sc.key == sc.key) displayed.sc = sc;
+        }
+        _addSC(sc);
+      }
       setState(() {});
     });
   }
@@ -1034,6 +1017,7 @@ class _PlayerSuperChatOverlayState extends State<PlayerSuperChatOverlay> {
             child: SizedBox(
               width: 240,
               child: PlayerSuperChatCard(
+                key: ValueKey(localSC.sc.key),
                 message: localSC.sc,
                 onExpire: () {},
                 duration: localSC.duration,

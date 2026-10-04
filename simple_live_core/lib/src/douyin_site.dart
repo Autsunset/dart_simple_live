@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:simple_live_core/src/common/convert_helper.dart';
 import 'package:simple_live_core/src/common/http_client.dart';
+import 'package:simple_live_core/src/common/embedded_json.dart';
 import 'package:simple_live_core/src/scripts/douyin_sign.dart';
 
 class DouyinSite implements LiveSite {
@@ -73,31 +74,32 @@ class DouyinSite implements LiveSite {
       header: await getRequestHeaders(),
     );
 
-    var renderData =
-        RegExp(
-          r'\{\\"pathname\\":\\"\/\\",\\"categoryData.*?\]\\n',
-        ).firstMatch(result)?.group(0) ??
-        "";
-    var renderDataJson = json.decode(
-      renderData
-          .trim()
-          .replaceAll('\\"', '"')
-          .replaceAll(r"\\", r"\")
-          .replaceAll(']\\n', ""),
-    );
-
-    for (var item in renderDataJson["categoryData"]) {
-      List<LiveSubCategory> subs = [];
-      var id = '${item["partition"]["id_str"]},${item["partition"]["type"]}';
-      for (var subItem in item["sub_partition"]) {
-        var subCategory = LiveSubCategory(
-          id: '${subItem["partition"]["id_str"]},${subItem["partition"]["type"]}',
-          name: asT<String?>(subItem["partition"]["title"]) ?? "",
-          parentId: id,
-          pic: "",
-        );
-        subs.add(subCategory);
+    final categoryData = extractNextDataArray(result, 'categoryData');
+    for (var item in categoryData) {
+      final id = '${item["partition"]["id_str"]},${item["partition"]["type"]}';
+      final subs = <LiveSubCategory>[];
+      final seen = <String>{id};
+      // Game partitions contain another level of specific games. Flatten all
+      // descendants while retaining each selectable partition.
+      void addChildren(List children) {
+        for (final child in children) {
+          final partition = child['partition'];
+          final childId = '${partition['id_str']},${partition['type']}';
+          if (seen.add(childId)) {
+            subs.add(
+              LiveSubCategory(
+                id: childId,
+                name: asT<String?>(partition['title']) ?? '',
+                parentId: id,
+                pic: '',
+              ),
+            );
+          }
+          addChildren(child['sub_partition'] as List? ?? const []);
+        }
       }
+
+      addChildren(item['sub_partition'] as List? ?? const []);
 
       var category = LiveCategory(
         children: subs,
@@ -706,7 +708,7 @@ class DouyinSite implements LiveSite {
         "Authority": 'www.douyin.com',
         'accept': 'application/json, text/plain, */*',
         'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'cookie': dyCookie,
+        'cookie': cookie.isNotEmpty ? cookie : dyCookie,
         'priority': 'u=1, i',
         'referer':
             'https://www.douyin.com/search/${Uri.encodeComponent(keyword)}?type=live',

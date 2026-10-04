@@ -605,6 +605,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
             var item = controller.superChats[i];
             return SuperChatCard(
               item,
+              key: ValueKey(item.key),
               onExpire: () {
                 controller.removeSuperChats();
               },

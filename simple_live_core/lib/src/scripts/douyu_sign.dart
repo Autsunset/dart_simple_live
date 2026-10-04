@@ -11,13 +11,14 @@ class DouyuSign {
       maxStackSize: 64 * 1024,
     );
 
-    flutterJs.eval(kCryptoJs);
-
-    var did = "10000000000000000000000000001501";
-    var time = (DateTime.now().millisecondsSinceEpoch / 1000).round();
-    flutterJs.eval(html);
-    var data = flutterJs.eval("ub98484234('$rid','$did','$time')");
-    flutterJs.dispose();
-    return data;
+    try {
+      flutterJs.eval(kCryptoJs);
+      var did = "10000000000000000000000000001501";
+      var time = (DateTime.now().millisecondsSinceEpoch / 1000).round();
+      flutterJs.eval(html);
+      return flutterJs.eval("ub98484234('$rid','$did','$time')");
+    } finally {
+      flutterJs.dispose();
+    }
   }
 }

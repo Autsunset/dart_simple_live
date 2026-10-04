@@ -36,6 +36,9 @@ class Log {
     }
     try {
       debugLogs.insert(0, DebugLogModel(DateTime.now(), content, color: color));
+      if (debugLogs.length > 500) {
+        debugLogs.removeRange(500, debugLogs.length);
+      }
     } catch (e) {
       if (kDebugMode) {
         print(e);

@@ -60,23 +60,32 @@ class BasePageController<T> extends BaseController {
   int pageSize = 24;
   var canLoadMore = false.obs;
   var list = <T>[].obs;
+  int _requestId = 0;
 
   Future refreshData() async {
+    if (isClosed) return;
+    // Supersede an in-flight page before clearing data. Its response must not
+    // append stale results or reset the newer request's loading state.
+    ++_requestId;
+    loadding = false;
     currentPage = 1;
     list.value = [];
     await loadData();
   }
 
   Future loadData() async {
+    if (isClosed || loadding) return;
+    final requestId = ++_requestId;
+    final page = currentPage;
     try {
-      if (loadding) return;
       loadding = true;
       pageError.value = false;
       pageEmpty.value = false;
       notLogin.value = false;
       pageLoadding.value = currentPage == 1;
 
-      var result = await getData(currentPage, pageSize);
+      var result = await getData(page, pageSize);
+      if (isClosed || requestId != _requestId) return;
       //是否可以加载更多
       if (result.isNotEmpty) {
         currentPage++;
@@ -89,16 +98,20 @@ class BasePageController<T> extends BaseController {
         }
       }
       // 赋值数据
-      if (currentPage == 1) {
+      if (page == 1) {
         list.value = result;
       } else {
         list.addAll(result);
       }
     } catch (e) {
-      handleError(e, showPageError: currentPage == 1);
+      if (!isClosed && requestId == _requestId) {
+        handleError(e, showPageError: page == 1);
+      }
     } finally {
-      loadding = false;
-      pageLoadding.value = false;
+      if (!isClosed && requestId == _requestId) {
+        loadding = false;
+        pageLoadding.value = false;
+      }
     }
   }
 
@@ -107,6 +120,7 @@ class BasePageController<T> extends BaseController {
   }
 
   void scrollToTopOrRefresh() {
+    if (isClosed || !scrollController.hasClients) return;
     if (scrollController.offset > 0) {
       scrollController.animateTo(
         0,
@@ -116,5 +130,13 @@ class BasePageController<T> extends BaseController {
     } else {
       easyRefreshController.callRefresh();
     }
+  }
+
+  @override
+  void onClose() {
+    ++_requestId;
+    scrollController.dispose();
+    easyRefreshController.dispose();
+    super.onClose();
   }
 }

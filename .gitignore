@@ -3,3 +3,9 @@ simple_live_tv_app/.vscode/settings.json
 
 # macOS Spotlight Search index file
 *.DS_Store
+
+# Local release packages
+dist/*.apk
+dist/*.sha256
+
+dist/*-SHA256SUMS.txt

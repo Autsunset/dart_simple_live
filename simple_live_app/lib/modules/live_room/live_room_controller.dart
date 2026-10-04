@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -14,6 +15,7 @@ import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/controller/app_settings_controller.dart';
 import 'package:simple_live_app/app/event_bus.dart';
 import 'package:simple_live_app/app/log.dart';
+import 'package:simple_live_app/app/crash_diagnostics.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/models/db/follow_user.dart';
@@ -32,10 +34,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   final Site pSite;
   final String pRoomId;
   late LiveDanmaku liveDanmaku;
-  LiveRoomController({
-    required this.pSite,
-    required this.pRoomId,
-  }) {
+  LiveRoomController({required this.pSite, required this.pRoomId}) {
     rxSite = pSite.obs;
     rxRoomId = pRoomId.obs;
     liveDanmaku = site.liveSite.getDanmaku();
@@ -101,11 +100,133 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
   /// 直播间加载失败
   var loadError = false.obs;
-  Error? error;
+  Object? error;
+  StackTrace? errorStackTrace;
+
+  bool get roomClosed => isClosed || playerClosing;
+  static const maxChatMessages = 500;
+  static const maxSuperChatMessages = 100;
+  bool _chatScrollScheduled = false;
+  Timer? _retryTimer;
+  int _lineRequestId = 0;
+  bool _playbackReady = false;
+
+  void _cancelPlaybackRetry() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+  }
+
+  static const chatFlushInterval = Duration(milliseconds: 150);
+  final Queue<LiveMessage> _pendingMessages = Queue<LiveMessage>();
+  Timer? _chatFlushTimer;
+  final Map<String, Pattern?> _shieldPatterns = {};
+
+  void _appendMessages(Iterable<LiveMessage> batch) {
+    final limit = disableAutoScroll.value ? maxChatMessages : 200;
+    final combined = [...messages, ...batch];
+    messages.value = combined.length > limit
+        ? combined.sublist(combined.length - limit)
+        : combined;
+  }
+
+  void _queueMessage(LiveMessage message) {
+    _pendingMessages.addLast(message);
+    if (_pendingMessages.length > maxChatMessages) {
+      _pendingMessages.removeFirst();
+    }
+    _chatFlushTimer ??= Timer(chatFlushInterval, _flushMessages);
+  }
+
+  void _flushMessages() {
+    _chatFlushTimer?.cancel();
+    _chatFlushTimer = null;
+    if (roomClosed || _pendingMessages.isEmpty) return;
+    final batch = _pendingMessages.toList();
+    _pendingMessages.clear();
+    _appendMessages(batch);
+    if (!_chatScrollScheduled && !isBackground && !disableAutoScroll.value) {
+      _chatScrollScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _chatScrollScheduled = false;
+        chatScrollToBottom();
+      });
+    }
+    if (liveStatus.value && !isBackground) {
+      addDanmaku(batch
+          .map((msg) => DanmakuContentItem(
+                msg.message,
+                color:
+                    Color.fromARGB(255, msg.color.r, msg.color.g, msg.color.b),
+              ))
+          .toList());
+    }
+  }
+
+  void _cancelPendingMessages() {
+    _chatFlushTimer?.cancel();
+    _chatFlushTimer = null;
+    _pendingMessages.clear();
+  }
+
+  bool _isShielded(String message) {
+    final keywords = AppSettingsController.instance.shieldList;
+    _shieldPatterns.removeWhere((keyword, _) => !keywords.contains(keyword));
+    for (final keyword in keywords) {
+      if (!_shieldPatterns.containsKey(keyword)) {
+        Pattern? pattern = keyword;
+        if (Utils.isRegexFormat(keyword)) {
+          try {
+            pattern = RegExp(Utils.removeRegexFormat(keyword));
+          } on FormatException {
+            pattern = null;
+            Log.d("关键词：$keyword 正则格式错误");
+          }
+        }
+        _shieldPatterns[keyword] = pattern;
+      }
+      final pattern = _shieldPatterns[keyword];
+      if (pattern != null && message.contains(pattern)) return true;
+    }
+    return false;
+  }
+
+  void _appendSuperChats(Iterable<LiveSuperChatMessage> incoming) {
+    final now = DateTime.now();
+    final merged = {for (final message in superChats) message.key: message};
+    for (final message in incoming) {
+      if (message.endTime.isAfter(now)) merged[message.key] = message;
+    }
+    final active = merged.values.where((m) => m.endTime.isAfter(now)).toList()
+      ..sort((a, b) => a.endTime.compareTo(b.endTime));
+    superChats.value = active.length > maxSuperChatMessages
+        ? active.sublist(active.length - maxSuperChatMessages)
+        : active;
+  }
+
+  void _trimSuperChats() {
+    final now = DateTime.now();
+    superChats.removeWhere((message) => message.endTime.isBefore(now));
+    if (superChats.length > maxSuperChatMessages) {
+      superChats.removeRange(0, superChats.length - maxSuperChatMessages);
+    }
+  }
+
+  int _roomRequestId = 0;
+  int _playUrlRequestId = 0;
 
   // 开播时长状态变量
   var liveDuration = "00:00:00".obs;
   Timer? _liveDurationTimer;
+  Timer? _playbackHealthTimer;
+
+  void _samplePlaybackHealth() {
+    if (roomClosed) return;
+    unawaited(CrashDiagnostics.samplePlayback(
+      'site=${site.id} quality=${currentQualityInfo.value} '
+      'chat=${messages.length} sc=${superChats.length} '
+      'background=$isBackground',
+    ));
+  }
 
   @override
   void onInit() {
@@ -119,14 +240,24 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     loadData();
 
     scrollController.addListener(scrollListener);
+    if (Platform.isAndroid) {
+      _samplePlaybackHealth();
+      _playbackHealthTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+        _trimSuperChats();
+        _samplePlaybackHealth();
+      });
+    }
 
     super.onInit();
   }
 
   void scrollListener() {
-    if (scrollController.position.userScrollDirection ==
-        ScrollDirection.forward) {
+    if (!scrollController.hasClients || roomClosed) return;
+    final position = scrollController.position;
+    if (position.userScrollDirection == ScrollDirection.forward) {
       disableAutoScroll.value = true;
+    } else if (position.extentAfter <= 24) {
+      disableAutoScroll.value = false;
     }
   }
 
@@ -158,8 +289,13 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
           exit(0);
         });
         autoExitTimer?.cancel();
-        var delay = await Utils.showAlertDialog("定时关闭已到时,是否延迟关闭?",
-            title: "延迟关闭", confirm: "延迟", cancel: "关闭", selectable: true);
+        var delay = await Utils.showAlertDialog(
+          "定时关闭已到时,是否延迟关闭?",
+          title: "延迟关闭",
+          confirm: "延迟",
+          cancel: "关闭",
+          selectable: true,
+        );
         if (delay) {
           timer.cancel();
           delayAutoExit.value = true;
@@ -176,16 +312,17 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   // 弹窗逻辑
 
   void refreshRoom() {
+    if (roomClosed) return;
     //messages.clear();
     superChats.clear();
-    liveDanmaku.stop();
+    _stopDanmaku();
 
     loadData();
   }
 
   /// 聊天栏始终滚动到底部
   void chatScrollToBottom() {
-    if (scrollController.hasClients) {
+    if (!roomClosed && scrollController.hasClients) {
       // 如果手动上拉过，就不自动滚动到底部
       if (disableAutoScroll.value) {
         return;
@@ -203,68 +340,31 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
   /// 接收到WebSocket信息
   void onWSMessage(LiveMessage msg) {
+    if (roomClosed) return;
     if (msg.type == LiveMessageType.chat) {
-      if (messages.length > 200 && !disableAutoScroll.value) {
-        messages.removeAt(0);
-      }
-
-      // 关键词屏蔽检查
-      for (var keyword in AppSettingsController.instance.shieldList) {
-        Pattern? pattern;
-        if (Utils.isRegexFormat(keyword)) {
-          String removedSlash = Utils.removeRegexFormat(keyword);
-          try {
-            pattern = RegExp(removedSlash);
-          } catch (e) {
-            // should avoid this during add keyword
-            Log.d("关键词：$keyword 正则格式错误");
-          }
-        } else {
-          pattern = keyword;
-        }
-        if (pattern != null && msg.message.contains(pattern)) {
-          Log.d("关键词：$keyword\n已屏蔽消息内容：${msg.message}");
-          return;
-        }
-      }
-
-      messages.add(msg);
-
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => chatScrollToBottom(),
-      );
-      if (!liveStatus.value || isBackground) {
-        return;
-      }
-
-      addDanmaku([
-        DanmakuContentItem(
-          msg.message,
-          color: Color.fromARGB(
-            255,
-            msg.color.r,
-            msg.color.g,
-            msg.color.b,
-          ),
-        ),
-      ]);
+      if (_isShielded(msg.message)) return;
+      _queueMessage(msg);
     } else if (msg.type == LiveMessageType.online) {
-      online.value = msg.data;
+      if (msg.data is int) online.value = msg.data;
     } else if (msg.type == LiveMessageType.superChat) {
-      superChats.add(msg.data);
+      if (msg.data is LiveSuperChatMessage) {
+        _appendSuperChats([msg.data as LiveSuperChatMessage]);
+      }
     }
   }
 
   /// 添加一条系统消息
   void addSysMsg(String msg) {
-    messages.add(
+    if (roomClosed) return;
+    _flushMessages();
+    _appendMessages([
       LiveMessage(
         type: LiveMessageType.chat,
         userName: "LiveSysMessage",
         message: msg,
         color: LiveMessageColor.white,
       ),
-    );
+    ]);
   }
 
   /// 接收到WebSocket关闭信息
@@ -279,13 +379,25 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
   /// 加载直播间信息
   void loadData() async {
+    if (roomClosed) return;
+    _playbackReady = false;
+    _cancelPlaybackRetry();
+    ++_playUrlRequestId;
+    final requestId = ++_roomRequestId;
+    final requestedSite = site;
+    final requestedRoomId = roomId;
     try {
       SmartDialog.showLoading(msg: "");
       loadError.value = false;
       error = null;
+      errorStackTrace = null;
       update();
       addSysMsg("正在读取直播间信息");
-      detail.value = await site.liveSite.getRoomDetail(roomId: roomId);
+      final roomDetail = await requestedSite.liveSite.getRoomDetail(
+        roomId: requestedRoomId,
+      );
+      if (roomClosed || requestId != _roomRequestId) return;
+      detail.value = roomDetail;
 
       if (site.id == Constant.kDouyin) {
         // 1.6.0之前收藏的WebRid
@@ -308,8 +420,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
               ),
             );
           } else {
-            followed.value =
-                DBService.instance.getFollowExist("${site.id}_$roomId");
+            followed.value = DBService.instance.getFollowExist(
+              "${site.id}_$roomId",
+            );
           }
         }
       }
@@ -329,26 +442,36 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       }
       addSysMsg("开始连接弹幕服务器");
       initDanmau();
-      liveDanmaku.start(detail.value?.danmakuData);
+      await liveDanmaku.start(detail.value?.danmakuData);
+      if (roomClosed || requestId != _roomRequestId) return;
       startLiveDurationTimer(); // 启动开播时长定时器
-    } catch (e) {
-      Log.logPrint(e);
+    } catch (e, stackTrace) {
+      if (roomClosed || requestId != _roomRequestId) return;
+      Log.e("直播间加载失败: $e", stackTrace);
       //SmartDialog.showToast(e.toString());
       loadError.value = true;
-      error = e as Error;
+      error = e;
+      errorStackTrace = stackTrace;
     } finally {
-      SmartDialog.dismiss(status: SmartStatus.loading);
+      if (!roomClosed && requestId == _roomRequestId) {
+        SmartDialog.dismiss(status: SmartStatus.loading);
+      }
     }
   }
 
   /// 初始化播放器
   void getPlayQualites() async {
+    final requestId = _roomRequestId;
+    final roomDetail = detail.value;
+    if (roomDetail == null || roomClosed) return;
     qualites.clear();
     currentQuality = -1;
 
     try {
-      var playQualites =
-          await site.liveSite.getPlayQualites(detail: detail.value!);
+      var playQualites = await site.liveSite.getPlayQualites(
+        detail: roomDetail,
+      );
+      if (roomClosed || requestId != _roomRequestId) return;
 
       if (playQualites.isEmpty) {
         SmartDialog.showToast("无法读取播放清晰度");
@@ -356,6 +479,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       }
       qualites.value = playQualites;
       var qualityLevel = await getQualityLevel();
+      if (roomClosed || requestId != _roomRequestId) return;
       if (qualityLevel == 2) {
         //最高
         currentQuality = 0;
@@ -370,6 +494,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
       getPlayUrl();
     } catch (e) {
+      if (roomClosed || requestId != _roomRequestId) return;
       Log.logPrint(e);
       SmartDialog.showToast("无法读取播放清晰度");
     }
@@ -390,33 +515,72 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   }
 
   void getPlayUrl() async {
-    playUrls.clear();
-    currentQualityInfo.value = qualites[currentQuality].quality;
-    currentLineInfo.value = "";
-    currentLineIndex = -1;
-    var playUrl = await site.liveSite
-        .getPlayUrls(detail: detail.value!, quality: qualites[currentQuality]);
-    if (playUrl.urls.isEmpty) {
-      SmartDialog.showToast("无法读取播放地址");
+    _playbackReady = false;
+    _cancelPlaybackRetry();
+    final requestId = _roomRequestId;
+    final playUrlRequestId = ++_playUrlRequestId;
+    final roomDetail = detail.value;
+    if (roomClosed ||
+        roomDetail == null ||
+        currentQuality < 0 ||
+        currentQuality >= qualites.length) {
       return;
     }
-    playUrls.value = playUrl.urls;
-    playHeaders = playUrl.headers;
-    currentLineIndex = 0;
-    currentLineInfo.value = "线路${currentLineIndex + 1}";
-    //重置错误次数
-    mediaErrorRetryCount = 0;
-    initPlaylist();
+    final quality = qualites[currentQuality];
+    playUrls.clear();
+    currentQualityInfo.value = quality.quality;
+    currentLineInfo.value = "";
+    currentLineIndex = -1;
+    try {
+      var playUrl = await site.liveSite.getPlayUrls(
+        detail: roomDetail,
+        quality: quality,
+      );
+      if (roomClosed ||
+          requestId != _roomRequestId ||
+          playUrlRequestId != _playUrlRequestId) {
+        return;
+      }
+      if (playUrl.urls.isEmpty) {
+        SmartDialog.showToast("无法读取播放地址");
+        return;
+      }
+      playUrls.value = playUrl.urls;
+      playHeaders = playUrl.headers;
+      currentLineIndex = 0;
+      currentLineInfo.value = "线路${currentLineIndex + 1}";
+      mediaErrorRetryCount = 0;
+      await initPlaylist(requestId, playUrlRequestId);
+    } catch (e, stackTrace) {
+      if (roomClosed ||
+          requestId != _roomRequestId ||
+          playUrlRequestId != _playUrlRequestId) {
+        return;
+      }
+      Log.e("读取播放地址失败: $e", stackTrace);
+      SmartDialog.showToast("无法读取播放地址");
+    }
   }
 
   void changePlayLine(int index) {
+    if (roomClosed || index < 0 || index >= playUrls.length) {
+      return;
+    }
+    _cancelPlaybackRetry();
+    ++_lineRequestId;
     currentLineIndex = index;
     //重置错误次数
     mediaErrorRetryCount = 0;
     setPlayer();
   }
 
-  void initPlaylist() async {
+  Future<void> initPlaylist(int requestId, int playUrlRequestId) async {
+    if (playUrls.isEmpty ||
+        roomClosed ||
+        requestId != _roomRequestId ||
+        playUrlRequestId != _playUrlRequestId) {
+      return;
+    }
     currentLineInfo.value = "线路${currentLineIndex + 1}";
     errorMsg.value = "";
 
@@ -428,77 +592,113 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       return Media(finalUrl, httpHeaders: playHeaders);
     }).toList();
 
-    // 初始化播放器并设置 ao 参数
-    await initializePlayer();
-
-    await player.open(Playlist(mediaList));
+    await runPlayerOperation(() async {
+      await initializePlayer();
+      if (roomClosed ||
+          requestId != _roomRequestId ||
+          playUrlRequestId != _playUrlRequestId) {
+        return;
+      }
+      _playbackReady = true;
+      await player.open(Playlist(mediaList));
+    },
+        isCurrent: () =>
+            requestId == _roomRequestId &&
+            playUrlRequestId == _playUrlRequestId);
   }
 
-  void setPlayer() async {
-    currentLineInfo.value = "线路${currentLineIndex + 1}";
+  Future<void> setPlayer() async {
+    final requestId = _roomRequestId;
+    final urlRequestId = _playUrlRequestId;
+    final lineRequestId = _lineRequestId;
+    final lineIndex = currentLineIndex;
+    if (roomClosed ||
+        !_playbackReady ||
+        lineIndex < 0 ||
+        lineIndex >= playUrls.length) {
+      return;
+    }
+    currentLineInfo.value = "线路${lineIndex + 1}";
     errorMsg.value = "";
-
-    await player.jump(currentLineIndex);
+    try {
+      await runPlayerOperation(() => player.jump(lineIndex),
+          isCurrent: () =>
+              requestId == _roomRequestId &&
+              urlRequestId == _playUrlRequestId &&
+              lineRequestId == _lineRequestId);
+    } catch (e, stackTrace) {
+      if (roomClosed ||
+          requestId != _roomRequestId ||
+          urlRequestId != _playUrlRequestId ||
+          lineRequestId != _lineRequestId) {
+        return;
+      }
+      Log.e("切换播放线路失败: $e", stackTrace);
+      mediaError(e.toString());
+    }
   }
 
   @override
-  void mediaEnd() async {
+  void mediaEnd() {
     super.mediaEnd();
-    if (mediaErrorRetryCount < 2) {
-      Log.d("播放结束，尝试第${mediaErrorRetryCount + 1}次刷新");
-      if (mediaErrorRetryCount == 1) {
-        //延迟一秒再刷新
-        await Future.delayed(const Duration(seconds: 1));
-      }
-      mediaErrorRetryCount += 1;
-      //刷新一次
-      setPlayer();
-      return;
-    }
-
-    Log.d("播放结束");
-    // 遍历线路，如果全部链接都断开就是直播结束了
-    if (playUrls.length - 1 == currentLineIndex) {
-      liveStatus.value = false;
-    } else {
-      changePlayLine(currentLineIndex + 1);
-
-      //setPlayer();
-    }
+    _schedulePlaybackRetry();
   }
 
   int mediaErrorRetryCount = 0;
   @override
-  void mediaError(String error) async {
-    super.mediaEnd();
-    if (mediaErrorRetryCount < 2) {
-      Log.d("播放失败，尝试第${mediaErrorRetryCount + 1}次刷新");
-      if (mediaErrorRetryCount == 1) {
-        //延迟一秒再刷新
-        await Future.delayed(const Duration(seconds: 1));
-      }
-      mediaErrorRetryCount += 1;
-      //刷新一次
-      setPlayer();
+  void mediaError(String error) {
+    super.mediaError(error);
+    _schedulePlaybackRetry(error: error);
+  }
+
+  void _schedulePlaybackRetry({String? error}) {
+    if (roomClosed ||
+        !_playbackReady ||
+        _retryTimer != null ||
+        currentLineIndex < 0 ||
+        currentLineIndex >= playUrls.length) {
       return;
     }
-
-    if (playUrls.length - 1 == currentLineIndex) {
-      errorMsg.value = "播放失败";
-      SmartDialog.showToast("播放失败:$error");
-    } else {
-      //currentLineIndex += 1;
-      //setPlayer();
-      changePlayLine(currentLineIndex + 1);
-    }
+    final requestId = _roomRequestId;
+    final urlRequestId = _playUrlRequestId;
+    final lineRequestId = _lineRequestId;
+    // mpv can emit error and completed for the same failure. Coalesce the burst.
+    _retryTimer = Timer(const Duration(seconds: 1), () {
+      _retryTimer = null;
+      if (roomClosed ||
+          !_playbackReady ||
+          requestId != _roomRequestId ||
+          urlRequestId != _playUrlRequestId ||
+          lineRequestId != _lineRequestId) {
+        return;
+      }
+      if (mediaErrorRetryCount < 2) {
+        mediaErrorRetryCount++;
+        Log.d("播放中断，尝试第$mediaErrorRetryCount次刷新");
+        unawaited(setPlayer());
+      } else if (currentLineIndex + 1 < playUrls.length) {
+        changePlayLine(currentLineIndex + 1);
+      } else {
+        _playbackReady = false;
+        if (error == null) {
+          liveStatus.value = false;
+        } else {
+          errorMsg.value = "播放失败";
+          SmartDialog.showToast("播放失败:$error");
+        }
+      }
+    });
   }
 
   /// 读取SC
   void getSuperChatMessage() async {
+    final requestId = _roomRequestId;
     try {
-      var sc =
-          await site.liveSite.getSuperChatMessage(roomId: detail.value!.roomId);
-      superChats.addAll(sc);
+      var sc = await site.liveSite.getSuperChatMessage(
+        roomId: detail.value!.roomId,
+      );
+      if (roomClosed || requestId != _roomRequestId) return;
+      _appendSuperChats(sc);
     } catch (e) {
       Log.logPrint(e);
       addSysMsg("SC读取失败");
@@ -591,8 +791,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     if (!liveStatus.value) {
       return;
     }
-    var playUrl = await site.liveSite
-        .getPlayUrls(detail: detail.value!, quality: qualites[currentQuality]);
+    var playUrl = await site.liveSite.getPlayUrls(
+      detail: detail.value!,
+      quality: qualites[currentQuality],
+    );
     if (playUrl.urls.isEmpty) {
       SmartDialog.showToast("无法读取播放地址");
       return;
@@ -666,10 +868,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
           itemCount: qualites.length,
           itemBuilder: (_, i) {
             var item = qualites[i];
-            return RadioListTile(
-              value: i,
-              title: Text(item.quality),
-            );
+            return RadioListTile(value: i, title: Text(item.quality));
           },
         ),
       ),
@@ -693,9 +892,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
             return RadioListTile(
               value: i,
               title: Text("线路${i + 1}"),
-              secondary: Text(
-                playUrls[i].contains(".flv") ? "FLV" : "HLS",
-              ),
+              secondary: Text(playUrls[i].contains(".flv") ? "FLV" : "HLS"),
             );
           },
         ),
@@ -757,8 +954,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         return;
       }
 
-      AppSettingsController.instance
-          .addShieldList(keywordController.text.trim());
+      AppSettingsController.instance.addShieldList(
+        keywordController.text.trim(),
+      );
       keywordController.text = "";
     }
 
@@ -811,10 +1009,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
                           top: 4,
                           bottom: 4,
                         ),
-                        child: Text(
-                          item,
-                          style: Get.textTheme.bodyMedium,
-                        ),
+                        child: Text(item, style: Get.textTheme.bodyMedium),
                       ),
                     ),
                   )
@@ -845,10 +1040,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
                           rxRoomId.value == item.roomId,
                       onTap: () {
                         Get.back();
-                        resetRoom(
-                          Sites.allSites[item.siteId]!,
-                          item.roomId,
-                        );
+                        resetRoom(Sites.allSites[item.siteId]!, item.roomId);
                       },
                     ),
                   );
@@ -884,10 +1076,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         children: [
           Obx(
             () => SwitchListTile(
-              title: Text(
-                "启用定时关闭",
-                style: Get.textTheme.titleMedium,
-              ),
+              title: Text("启用定时关闭", style: Get.textTheme.titleMedium),
               value: autoExitEnable.value,
               onChanged: (e) {
                 autoExitEnable.value = e;
@@ -925,11 +1114,14 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
                 if (value == null || (value.hour == 0 && value.minute == 0)) {
                   return;
                 }
-                var duration =
-                    Duration(hours: value.hour, minutes: value.minute);
+                var duration = Duration(
+                  hours: value.hour,
+                  minutes: value.minute,
+                );
                 autoExitMinutes.value = duration.inMinutes;
-                AppSettingsController.instance
-                    .setRoomAutoExitDuration(autoExitMinutes.value);
+                AppSettingsController.instance.setRoomAutoExitDuration(
+                  autoExitMinutes.value,
+                );
                 //setAutoExitDuration(duration.inMinutes);
                 setAutoExit();
               },
@@ -970,15 +1162,20 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   }
 
   void resetRoom(Site site, String roomId) async {
+    if (roomClosed) return;
     if (this.site == site && this.roomId == roomId) {
       return;
     }
+    _playbackReady = false;
+    _cancelPlaybackRetry();
 
     rxSite.value = site;
     rxRoomId.value = roomId;
+    final requestId = ++_roomRequestId;
+    ++_playUrlRequestId;
 
     // 清除全部消息
-    liveDanmaku.stop();
+    _stopDanmaku();
     messages.clear();
     superChats.clear();
     danmakuController?.clear();
@@ -987,10 +1184,15 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     liveDanmaku = site.liveSite.getDanmaku();
 
     // 停止播放
-    await player.stop();
+    try {
+      await runPlayerOperation(() => player.stop(),
+          isCurrent: () => requestId == _roomRequestId);
+    } catch (e, stackTrace) {
+      Log.e("停止旧直播流失败: $e", stackTrace);
+    }
 
     // 刷新信息
-    loadData();
+    if (!roomClosed && requestId == _roomRequestId) loadData();
   }
 
   void copyErrorDetail() {
@@ -999,7 +1201,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 错误信息：
 ${error?.toString()}
 ----------------
-${error?.stackTrace}''');
+$errorStackTrace''');
     SmartDialog.showToast("已复制错误信息");
   }
 
@@ -1017,7 +1219,19 @@ ${error?.stackTrace}''');
     if (state == AppLifecycleState.resumed) {
       Log.d("返回前台");
       isBackground = false;
+      danmakuController?.resume();
     }
+  }
+
+  @override
+  void didHaveMemoryPressure() {
+    super.didHaveMemoryPressure();
+    if (roomClosed) return;
+    danmakuController?.clear();
+    _cancelPendingMessages();
+    if (messages.length > 100) messages.removeRange(0, messages.length - 100);
+    _trimSuperChats();
+    _samplePlaybackHealth();
   }
 
   // 用于启动开播时长计算和更新的函数
@@ -1051,15 +1265,34 @@ ${error?.stackTrace}''');
     }
   }
 
+  void _stopDanmaku() {
+    _cancelPendingMessages();
+    final danmaku = liveDanmaku;
+    danmaku.onMessage = null;
+    danmaku.onClose = null;
+    danmaku.onReady = null;
+    unawaited(Future.sync(() => danmaku.stop())
+        .catchError((Object e, StackTrace stack) {
+      Log.e("关闭弹幕连接失败: $e", stack);
+    }));
+  }
+
   @override
   void onClose() {
+    playerClosing = true;
+    _playbackReady = false;
+    _cancelPlaybackRetry();
+    ++_roomRequestId;
+    ++_playUrlRequestId;
     WidgetsBinding.instance.removeObserver(this);
     scrollController.removeListener(scrollListener);
+    scrollController.dispose();
     autoExitTimer?.cancel();
 
-    liveDanmaku.stop();
+    _stopDanmaku();
     danmakuController = null;
     _liveDurationTimer?.cancel(); // 页面关闭时取消定时器
+    _playbackHealthTimer?.cancel();
     super.onClose();
   }
 }

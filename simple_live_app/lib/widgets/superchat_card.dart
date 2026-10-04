@@ -22,32 +22,43 @@ class SuperChatCard extends StatefulWidget {
 }
 
 class _SuperChatCardState extends State<SuperChatCard> {
-  late Timer timer;
+  Timer? timer;
 
   int countdown = 0;
 
   @override
   void initState() {
-    var currentTime = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    var endTime = widget.message.endTime.millisecondsSinceEpoch ~/ 1000;
-
-    countdown = endTime - currentTime;
-
-    timer = Timer.periodic(const Duration(seconds: 1), timerCallback);
-
     super.initState();
+    _startCountdown();
   }
 
-  void timerCallback(e) {
-    if (countdown <= 0) {
-      widget.onExpire?.call();
-      timer.cancel();
-      return;
-    }
+  int _remaining() => widget.message.endTime
+      .difference(DateTime.now())
+      .inSeconds
+      .clamp(0, 86400);
 
-    setState(() {
-      countdown -= 1;
+  void _startCountdown() {
+    timer?.cancel();
+    countdown = _remaining();
+    // An overlay supplies its own timer and shorter display duration.
+    if (widget.customCountdown != null) return;
+    timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => countdown = _remaining());
+      if (countdown <= 0) {
+        timer?.cancel();
+        widget.onExpire?.call();
+      }
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant SuperChatCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.message.endTime != widget.message.endTime ||
+        oldWidget.customCountdown != widget.customCountdown) {
+      _startCountdown();
+    }
   }
 
   @override
@@ -123,7 +134,7 @@ class _SuperChatCardState extends State<SuperChatCard> {
 
   @override
   void dispose() {
-    timer.cancel();
+    timer?.cancel();
     super.dispose();
   }
 }

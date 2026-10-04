@@ -1,7 +1,7 @@
 {
-  "version": "1.11.1",
-  "version_num": 11101,
-  "version_desc": "- 版本更新",
+  "version": "1.12.0",
+  "version_num": 11200,
+  "version_desc": "- 修复B站和抖音分类\n- 优化高频聊天消息和SC展示\n- 首页与分类同步平台选择\n- 提升播放切换与释放稳定性",
   "prerelease": false,
-  "download_url": "https://github.com/xiaoyaocz/dart_simple_live/releases"
+  "download_url": "https://github.com/Autsunset/dart_simple_live/releases/tag/android-v1.12.0"
 }

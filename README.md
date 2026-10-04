@@ -1,4 +1,5 @@
-> ### ⚠ 本项目不提供Release安装包，请自行编译后运行测试。
+> 此 fork 提供 Android 安装包：[下载新版](https://github.com/Autsunset/dart_simple_live/releases)。
+> 当前版本：1.12.0，更新与验证说明见 [发布记录](docs/release-1.12.0.md)。
 
 
 <p align="center">
@@ -42,7 +43,7 @@
 
 ## 环境
 
-Flutter : `3.38`
+Flutter : `3.44.0`（本版构建与验证版本）
 
 ## 参考及引用
 

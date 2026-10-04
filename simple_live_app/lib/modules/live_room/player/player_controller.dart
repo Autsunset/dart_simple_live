@@ -21,8 +21,19 @@ import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/utils.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:window_manager/window_manager.dart';
+import 'player_operation_queue.dart';
 
 mixin PlayerMixin {
+  final playerOperations = PlayerOperationQueue();
+  bool playerClosing = false;
+
+  Future<void> runPlayerOperation(
+    Future<void> Function() operation, {
+    bool Function()? isCurrent,
+  }) =>
+      playerOperations.run(operation,
+          isCurrent: () => !playerClosing && (isCurrent?.call() ?? true));
+
   GlobalKey<VideoState> globalPlayerKey = GlobalKey<VideoState>();
   GlobalKey globalDanmuKey = GlobalKey();
 
@@ -38,18 +49,20 @@ mixin PlayerMixin {
 
   /// 初始化播放器并设置 ao 参数
   Future<void> initializePlayer() async {
-    var pp = player.platform as NativePlayer;
+    if (playerClosing) return;
+    final pp = player.platform;
+    if (pp is! NativePlayer) return;
     // 设置音频输出驱动
     if (AppSettingsController.instance.customPlayerOutput.value) {
-      if (player.platform is NativePlayer) {
-        await (player.platform as dynamic).setProperty(
+      if (!playerClosing) {
+        await pp.setProperty(
           'ao',
           AppSettingsController.instance.audioOutputDriver.value,
         );
       }
     }
     // media_kit 仓库更新导致的问题，临时解决办法
-    if(Platform.isAndroid){
+    if (Platform.isAndroid && !playerClosing) {
       await pp.setProperty('force-seekable', 'yes');
     }
   }
@@ -251,8 +264,8 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
 
   /// 释放一些系统状态
   Future resetSystem() async {
-    _pipSubscription?.cancel();
-    //pip.dispose();
+    await _pipSubscription?.cancel();
+    _pipSubscription = null;
     await SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.edgeToEdge,
       overlays: SystemUiOverlay.values,
@@ -429,13 +442,14 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
   bool danmakuStateBeforePIP = false;
 
   Future enablePIP() async {
-    if (!Platform.isAndroid) {
+    if (!Platform.isAndroid || playerClosing) {
       return;
     }
     if (await pip.isPipAvailable == false) {
       SmartDialog.showToast("设备不支持小窗播放");
       return;
     }
+    if (playerClosing) return;
     danmakuStateBeforePIP = showDanmakuState.value;
     //关闭并清除弹幕
     if (AppSettingsController.instance.pipHideDanmu.value &&
@@ -461,7 +475,9 @@ mixin PlayerSystemMixin on PlayerMixin, PlayerStateMixin, PlayerDanmakuMixin {
       ),
     );
 
+    if (playerClosing) return;
     _pipSubscription ??= pip.pipStatusStream.listen((event) {
+      if (playerClosing) return;
       if (event == PiPStatus.disabled) {
         danmakuController?.clear();
         showDanmakuState.value = danmakuStateBeforePIP;
@@ -664,7 +680,11 @@ class PlayerController extends BaseController
     initSystem();
     initStream();
     //设置音量
-    player.setVolume(AppSettingsController.instance.playerVolume.value);
+    unawaited(runPlayerOperation(() => player.setVolume(
+          AppSettingsController.instance.playerVolume.value,
+        )).catchError((Object e, StackTrace stack) {
+      Log.e("设置播放器音量失败: $e", stack);
+    }));
     super.onInit();
   }
 
@@ -677,6 +697,7 @@ class PlayerController extends BaseController
 
   void initStream() {
     _errorSubscription = player.stream.error.listen((event) {
+      if (playerClosing) return;
       Log.d("播放器错误：$event");
       // 跳过无音频输出的错误
       // Could not open/initialize audio device -> no sound.
@@ -688,6 +709,7 @@ class PlayerController extends BaseController
     });
 
     _playingSubscription = player.stream.playing.listen((event) {
+      if (playerClosing) return;
       if (event) {
         WakelockPlus.enable();
         Log.d("Playing");
@@ -695,20 +717,24 @@ class PlayerController extends BaseController
     });
 
     _completedSubscription = player.stream.completed.listen((event) {
+      if (playerClosing) return;
       if (event) {
         mediaEnd();
       }
     });
     _logSubscription = player.stream.log.listen((event) {
+      if (playerClosing) return;
       Log.d("播放器日志：$event");
     });
     _widthSubscription = player.stream.width.listen((event) {
+      if (playerClosing) return;
       Log.d(
           'width:$event  W:${(player.state.width)}  H:${(player.state.height)}');
       isVertical.value =
           (player.state.height ?? 9) > (player.state.width ?? 16);
     });
     _heightSubscription = player.stream.height.listen((event) {
+      if (playerClosing) return;
       Log.d(
           'height:$event  W:${(player.state.width)}  H:${(player.state.height)}');
       isVertical.value =
@@ -834,15 +860,33 @@ class PlayerController extends BaseController
   }
 
   @override
-  void onClose() async {
+  void onClose() {
+    playerClosing = true;
+    hidevolumeTimer?.cancel();
+    hideControlsTimer?.cancel();
+    hideSeekTipTimer?.cancel();
     Log.w("播放器关闭");
     if (smallWindowState.value) {
       exitSmallWindow();
     }
     disposeStream();
     disposeDanmakuController();
-    await resetSystem();
-    await player.dispose();
     super.onClose();
+    unawaited(_disposePlayer());
+  }
+
+  Future<void> _disposePlayer() async {
+    // Close admission synchronously; only in-flight work may finish.
+    final disposal = playerOperations.close(() => player.dispose());
+    // Attach the error handler before awaiting system cleanup.
+    final handledDisposal = disposal.catchError((Object e, StackTrace stack) {
+      Log.e("释放播放器失败: $e", stack);
+    });
+    try {
+      await resetSystem();
+    } catch (e, stackTrace) {
+      Log.e("重置播放器系统状态失败: $e", stackTrace);
+    }
+    await handledDisposal;
   }
 }

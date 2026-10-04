@@ -86,6 +86,12 @@ class LiveMessageColor {
 }
 
 class LiveSuperChatMessage {
+  final String? id;
+
+  /// Stable identity across API snapshots and WebSocket updates.
+  String get key => id != null && id!.isNotEmpty
+      ? 'id:$id'
+      : '$userName|${startTime.millisecondsSinceEpoch}|$price|$message';
   final String userName;
   final String face;
   final String message;
@@ -95,6 +101,7 @@ class LiveSuperChatMessage {
   final String backgroundColor;
   final String backgroundBottomColor;
   LiveSuperChatMessage({
+    this.id,
     required this.backgroundBottomColor,
     required this.backgroundColor,
     required this.endTime,

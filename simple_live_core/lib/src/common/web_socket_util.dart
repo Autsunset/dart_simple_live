@@ -1,42 +1,23 @@
 import 'dart:async';
 
+import 'package:simple_live_core/src/common/core_log.dart';
 import 'package:web_socket_channel/io.dart';
 
-enum SocketStatus {
-  connected,
-  failed,
-  closed,
-}
+enum SocketStatus { connected, failed, closed }
 
 class WebScoketUtils {
   SocketStatus status = SocketStatus.closed;
-
-  /// 链接
   final String url;
-
-  /// 备用链接
   final String? backupUrl;
-
-  /// 心跳时间
   final int heartBeatTime;
-
-  /// 接收到信息
   final Function(dynamic)? onMessage;
-
-  /// 连接关闭
   final Function(String msg)? onClose;
-
-  /// 尝试重连
   final Function()? onReconnect;
-
-  /// 准备就绪
   final Function()? onReady;
-
-  /// 心跳
   final Function()? onHeartBeat;
-
-  /// 请求头
+  final Duration reconnectDelay;
   Map<String, dynamic>? headers;
+
   WebScoketUtils({
     required this.url,
     required this.heartBeatTime,
@@ -47,118 +28,144 @@ class WebScoketUtils {
     this.onHeartBeat,
     this.headers,
     this.backupUrl,
+    this.reconnectDelay = const Duration(seconds: 5),
   });
+
   IOWebSocketChannel? webSocket;
   Timer? heartBeatTimer;
-
-  /// 重连次数
   int reconnectTime = 0;
   Timer? reconnectTimer;
-
-  /// 最大重连次数
   int maxReconnectTime = 5;
-
   StreamSubscription<dynamic>? streamSubscription;
+  int _generation = 0;
 
-  void connect({bool retry = false}) async {
+  Future<void> connect({bool retry = false}) async {
     close();
+    final generation = _generation;
+    var connected = false;
     try {
-      var wsurl = url;
-      if (backupUrl != null && backupUrl!.isNotEmpty && retry) {
-        wsurl = backupUrl!;
-      }
-      webSocket = IOWebSocketChannel.connect(
+      final wsurl = retry && (backupUrl?.isNotEmpty ?? false)
+          ? backupUrl!
+          : url;
+      final channel = IOWebSocketChannel.connect(
         wsurl,
-        connectTimeout: Duration(seconds: 10),
+        connectTimeout: const Duration(seconds: 10),
         headers: headers,
       );
-
-      await webSocket?.ready;
+      webSocket = channel;
+      // Subscribe before awaiting the handshake: connection errors are also
+      // delivered on the stream, and must have a handler from the outset.
+      streamSubscription = channel.stream.listen(
+        (data) {
+          if (generation == _generation && connected) receiveMessage(data);
+        },
+        onError: (Object error, StackTrace stack) {
+          if (generation == _generation && connected) onError(error, stack);
+        },
+        onDone: () {
+          if (generation == _generation && connected) onDone();
+        },
+      );
+      await channel.ready;
+      if (generation != _generation) return;
+      connected = true;
       ready();
-    } catch (e) {
+    } catch (error, stack) {
+      if (generation != _generation) return;
       if (!retry) {
-        connect(retry: true);
-        return;
+        await connect(retry: true);
+      } else {
+        onError(error, stack);
       }
-      onError(e, e);
     }
   }
 
-  /// 连接完成
   void ready() {
     status = SocketStatus.connected;
-
-    streamSubscription = webSocket?.stream.listen(
-      (data) => receiveMessage(data),
-      onError: (e, s) => onError(e, s),
-      onDone: onDone,
-    );
-
-    onReady?.call();
-    initHeartBeat();
+    final generation = _generation;
+    _notify(() => onReady?.call());
+    if (generation == _generation && status == SocketStatus.connected) {
+      initHeartBeat();
+    }
   }
 
   void initHeartBeat() {
-    heartBeatTimer = Timer.periodic(
-      Duration(milliseconds: heartBeatTime),
-      (timer) {
-        onHeartBeat?.call();
-      },
-    );
+    heartBeatTimer?.cancel();
+    if (heartBeatTime <= 0) return;
+    final generation = _generation;
+    heartBeatTimer = Timer.periodic(Duration(milliseconds: heartBeatTime), (_) {
+      if (generation == _generation && status == SocketStatus.connected) {
+        _notify(() => onHeartBeat?.call());
+      }
+    });
   }
 
   void receiveMessage(dynamic data) {
-    //接受到一条信息才算重连成功
     reconnectTime = 0;
-    onMessage?.call(data);
+    _notify(() => onMessage?.call(data));
   }
 
-  void onError(e, s) {
+  void onError(Object error, Object stack) {
+    final generation = _generation;
     status = SocketStatus.failed;
-    onClose?.call(e.toString());
+    _notify(() => onClose?.call(error.toString()));
+    if (generation == _generation) reconnect();
   }
 
   void onDone() {
-    if (status == SocketStatus.closed) {
-      return;
-    }
-    onReconnect?.call();
-    reconnect();
+    if (status == SocketStatus.closed) return;
+    final generation = _generation;
+    _notify(() => onReconnect?.call());
+    if (generation == _generation) reconnect();
   }
 
   void sendMessage(dynamic message) {
-    if (status == SocketStatus.connected) {
+    if (status != SocketStatus.connected) return;
+    try {
       webSocket?.sink.add(message);
+    } catch (error, stack) {
+      onError(error, stack);
     }
   }
 
   void close() {
+    ++_generation;
     status = SocketStatus.closed;
-
-    streamSubscription?.cancel();
-
     reconnectTimer?.cancel();
     reconnectTimer = null;
-
-    webSocket?.sink.close();
-
     heartBeatTimer?.cancel();
     heartBeatTimer = null;
+    final subscription = streamSubscription;
+    streamSubscription = null;
+    final channel = webSocket;
+    webSocket = null;
+    _notify(() => subscription?.cancel());
+    _notify(() => channel?.sink.close());
   }
 
   void reconnect() {
-    status = SocketStatus.closed;
-    if (reconnectTime < maxReconnectTime) {
-      reconnectTime++;
-      reconnectTimer ??= Timer.periodic(Duration(seconds: 5), (timer) {
-        connect();
-      });
-    } else {
-      onClose?.call("重连超过最大次数，与服务器断开连接");
-      reconnectTimer?.cancel();
-      reconnectTimer = null;
-      close();
+    close();
+    if (reconnectTime >= maxReconnectTime) {
+      _notify(() => onClose?.call("重连超过最大次数，与服务器断开连接"));
       return;
     }
+    reconnectTime++;
+    final generation = _generation;
+    reconnectTimer = Timer(reconnectDelay, () {
+      reconnectTimer = null;
+      if (generation == _generation) unawaited(connect());
+    });
+  }
+
+  void _notify(FutureOr<dynamic> Function() callback) {
+    // Includes async callbacks, heartbeat errors, and sink cleanup failures.
+    unawaited(
+      Future<dynamic>.sync(callback).then<void>(
+        (_) {},
+        onError: (Object error, StackTrace stack) {
+          CoreLog.e('弹幕回调失败: $error', stack);
+        },
+      ),
+    );
   }
 }
