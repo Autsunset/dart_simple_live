@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:simple_live_core/src/common/http_client.dart';
+import 'package:simple_live_core/src/scripts/douyu_sign.dart';
 import 'package:test/test.dart';
 
 class _Site extends DouyuSite {
@@ -18,6 +19,8 @@ class _Adapter implements HttpClientAdapter {
   final requests = <RequestOptions>[];
   final gates = <String, Completer<void>>{};
   bool failAll = false;
+  final returnedRates = <String, int>{};
+  String? expectedCookie;
   @override
   Future<ResponseBody> fetch(
     RequestOptions options,
@@ -25,7 +28,13 @@ class _Adapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     requests.add(options);
+    if (expectedCookie != null) {
+      expect(options.headers['cookie'], expectedCookie);
+    }
     final args = Uri.splitQueryString(options.data as String);
+    expect(args['iar'], '0');
+    expect(args['ive'], '0');
+    expect(args['fa'], '0');
     final cdn = args['cdn']!;
     final gate = gates[cdn];
     if (gate != null) await gate.future;
@@ -34,6 +43,12 @@ class _Adapter implements HttpClientAdapter {
         : {
             'error': 0,
             'data': {
+              'rate': returnedRates[cdn] ?? int.parse(args['rate']!),
+              'multirates': [
+                {'rate': 0, 'name': '原画1080P60'},
+                {'rate': 3, 'name': '超清'},
+                {'rate': 2, 'name': '高清'},
+              ],
               'rtmp_url': 'https://$cdn.invalid',
               'rtmp_live': 'live.flv?rate=${args['rate']}&amp;token=ok',
             },
@@ -126,4 +141,54 @@ void main() {
       );
     },
   );
+  test(
+    'routes that honor requested quality come first and report actual names',
+    () async {
+      adapter.returnedRates['first'] = 2;
+      adapter.returnedRates['last'] = 0;
+      final result = await _Site().getPlayUrls(
+        detail: detail,
+        quality: LivePlayQuality(
+          quality: '原画1080P60',
+          data: DouyuPlayData(0, ['first', 'last']),
+        ),
+      );
+      expect(result.urls.map((s) => Uri.parse(s).host), [
+        'last.invalid',
+        'first.invalid',
+      ]);
+      expect(result.qualities, ['原画1080P60', '高清']);
+      expect(result.headers?['referer'], 'https://www.douyu.com/1');
+      expect(result.headers?.containsKey('cookie'), isFalse);
+    },
+  );
+
+  test(
+    'account cookie device identity takes priority over injected fallback',
+    () async {
+      adapter.expectedCookie =
+          'session=fake; acf_did=account-device; dy_did=account-device';
+      await (_Site()
+            ..cookie = 'session=fake; acf_did=account-device'
+            ..deviceId = 'fallback-device')
+          .getPlayUrls(
+            detail: detail,
+            quality: LivePlayQuality(
+              quality: '高清',
+              data: DouyuPlayData(2, ['first']),
+            ),
+          );
+    },
+  );
+
+  test('signer forwards explicit identity and quotes arguments as data', () {
+    const room = "1'\\quoted";
+    const device = 'device"\\id';
+    final result = DouyuSign.getSign(
+      'function ub98484234(rid,did,time){return JSON.stringify([rid,did]);}',
+      room,
+      device,
+    );
+    expect(jsonDecode(result), [room, device]);
+  });
 }

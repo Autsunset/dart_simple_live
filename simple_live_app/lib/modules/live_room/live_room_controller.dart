@@ -24,8 +24,7 @@ import 'package:simple_live_app/modules/live_room/player/player_controller.dart'
 import 'package:simple_live_app/modules/settings/danmu_settings_page.dart';
 import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/follow_service.dart';
-import 'package:simple_live_app/widgets/desktop_refresh_button.dart';
-import 'package:simple_live_app/widgets/follow_user_item.dart';
+import 'package:simple_live_app/modules/live_room/widgets/room_quick_switch.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -72,6 +71,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   RxList<String> playUrls = RxList<String>();
 
   Map<String, String>? playHeaders;
+  List<String>? _returnedQualities;
 
   /// 当前线路
   var currentLineIndex = -1;
@@ -81,6 +81,8 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   var countdown = 60.obs;
 
   Timer? autoExitTimer;
+  Timer? _autoExitConfirmationTimer;
+  int _autoExitRequestId = 0;
 
   /// 设置的自动关闭时间（分钟）
   var autoExitMinutes = 60.obs;
@@ -94,6 +96,9 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   /// 是否禁用自动滚动聊天栏
   /// - 当用户向上滚动聊天栏时，不再自动滚动
   var disableAutoScroll = false.obs;
+
+  /// Remember the last picker tab across portrait/landscape openings.
+  final quickSwitchTab = 0.obs;
 
   /// 是否处于后台
   var isBackground = false;
@@ -152,13 +157,21 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       });
     }
     if (liveStatus.value && !isBackground) {
-      addDanmaku(batch
-          .map((msg) => DanmakuContentItem(
+      addDanmaku(
+        batch
+            .map(
+              (msg) => DanmakuContentItem(
                 msg.message,
-                color:
-                    Color.fromARGB(255, msg.color.r, msg.color.g, msg.color.b),
-              ))
-          .toList());
+                color: Color.fromARGB(
+                  255,
+                  msg.color.r,
+                  msg.color.g,
+                  msg.color.b,
+                ),
+              ),
+            )
+            .toList(),
+      );
     }
   }
 
@@ -221,11 +234,13 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
   void _samplePlaybackHealth() {
     if (roomClosed) return;
-    unawaited(CrashDiagnostics.samplePlayback(
-      'site=${site.id} quality=${currentQualityInfo.value} '
-      'chat=${messages.length} sc=${superChats.length} '
-      'background=$isBackground',
-    ));
+    unawaited(
+      CrashDiagnostics.samplePlayback(
+        'site=${site.id} quality=${currentQualityInfo.value} '
+        'chat=${messages.length} sc=${superChats.length} '
+        'background=$isBackground',
+      ),
+    );
   }
 
   @override
@@ -275,39 +290,71 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   }
 
   void setAutoExit() {
-    if (!autoExitEnable.value) {
-      autoExitTimer?.cancel();
-      return;
-    }
+    final requestId = ++_autoExitRequestId;
     autoExitTimer?.cancel();
+    _autoExitConfirmationTimer?.cancel();
+    _autoExitConfirmationTimer = null;
+    if (roomClosed || !autoExitEnable.value) return;
     countdown.value = autoExitMinutes.value * 60;
-    autoExitTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+    autoExitTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (roomClosed || requestId != _autoExitRequestId) {
+        timer.cancel();
+        return;
+      }
       countdown.value -= 1;
       if (countdown.value <= 0) {
-        timer = Timer(const Duration(seconds: 10), () async {
-          await WakelockPlus.disable();
-          exit(0);
-        });
-        autoExitTimer?.cancel();
-        var delay = await Utils.showAlertDialog(
-          "定时关闭已到时,是否延迟关闭?",
-          title: "延迟关闭",
-          confirm: "延迟",
-          cancel: "关闭",
-          selectable: true,
-        );
-        if (delay) {
-          timer.cancel();
-          delayAutoExit.value = true;
-          showAutoExitSheet();
-          setAutoExit();
-        } else {
-          delayAutoExit.value = false;
-          await WakelockPlus.disable();
-          exit(0);
-        }
+        timer.cancel();
+        unawaited(_confirmAutoExit(requestId));
       }
     });
+  }
+
+  Future<bool> showAutoExitConfirmation() => Utils.showAlertDialog(
+    "定时关闭已到时,是否延迟关闭?",
+    title: "延迟关闭",
+    confirm: "延迟",
+    cancel: "关闭",
+    selectable: true,
+  );
+
+  void exitApplication() => exit(0);
+
+  bool _autoExitIsCurrent(int requestId) =>
+      !roomClosed && autoExitEnable.value && requestId == _autoExitRequestId;
+
+  Future<void> _exitIfCurrent(int requestId) async {
+    if (!_autoExitIsCurrent(requestId)) return;
+    try {
+      await WakelockPlus.disable();
+      if (!_autoExitIsCurrent(requestId)) return;
+      ++_autoExitRequestId; // A timeout and a dialog result can fire together.
+      _autoExitConfirmationTimer?.cancel();
+      _autoExitConfirmationTimer = null;
+      exitApplication();
+    } catch (e, stack) {
+      Log.e("定时关闭失败: $e", stack);
+    }
+  }
+
+  Future<void> _confirmAutoExit(int requestId) async {
+    _autoExitConfirmationTimer = Timer(const Duration(seconds: 10), () {
+      unawaited(_exitIfCurrent(requestId));
+    });
+    try {
+      final delay = await showAutoExitConfirmation();
+      if (!_autoExitIsCurrent(requestId)) return;
+      _autoExitConfirmationTimer?.cancel();
+      _autoExitConfirmationTimer = null;
+      delayAutoExit.value = delay;
+      if (delay) {
+        showAutoExitSheet();
+        setAutoExit();
+      } else {
+        await _exitIfCurrent(requestId);
+      }
+    } catch (e, stack) {
+      Log.e("定时关闭确认失败: $e", stack);
+    }
   }
   // 弹窗逻辑
 
@@ -528,6 +575,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
     final quality = qualites[currentQuality];
     playUrls.clear();
+    _returnedQualities = null;
     currentQualityInfo.value = quality.quality;
     currentLineInfo.value = "";
     currentLineIndex = -1;
@@ -547,6 +595,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       }
       playUrls.value = playUrl.urls;
       playHeaders = playUrl.headers;
+      _returnedQualities = playUrl.qualities;
       currentLineIndex = 0;
       currentLineInfo.value = "线路${currentLineIndex + 1}";
       mediaErrorRetryCount = 0;
@@ -582,6 +631,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       return;
     }
     currentLineInfo.value = "线路${currentLineIndex + 1}";
+    _updateReturnedQuality();
     errorMsg.value = "";
 
     final mediaList = playUrls.map((url) {
@@ -592,19 +642,35 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       return Media(finalUrl, httpHeaders: playHeaders);
     }).toList();
 
-    await runPlayerOperation(() async {
-      await initializePlayer();
-      if (roomClosed ||
-          requestId != _roomRequestId ||
-          playUrlRequestId != _playUrlRequestId) {
-        return;
-      }
-      _playbackReady = true;
-      await player.open(Playlist(mediaList));
-    },
-        isCurrent: () =>
-            requestId == _roomRequestId &&
-            playUrlRequestId == _playUrlRequestId);
+    await runPlayerOperation(
+      () async {
+        await initializePlayer();
+        if (roomClosed ||
+            requestId != _roomRequestId ||
+            playUrlRequestId != _playUrlRequestId) {
+          return;
+        }
+        _playbackReady = true;
+        await player.open(Playlist(mediaList));
+      },
+      isCurrent: () =>
+          requestId == _roomRequestId && playUrlRequestId == _playUrlRequestId,
+    );
+  }
+
+  void _updateReturnedQuality() {
+    if (currentQuality < 0 || currentQuality >= qualites.length) return;
+    final requested = qualites[currentQuality].quality;
+    final returned = _returnedQualities;
+    final actual =
+        returned != null &&
+            currentLineIndex >= 0 &&
+            currentLineIndex < returned.length
+        ? returned[currentLineIndex]
+        : '';
+    currentQualityInfo.value = actual.isEmpty || actual == requested
+        ? requested
+        : '实际：$actual';
   }
 
   Future<void> setPlayer() async {
@@ -619,13 +685,16 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       return;
     }
     currentLineInfo.value = "线路${lineIndex + 1}";
+    _updateReturnedQuality();
     errorMsg.value = "";
     try {
-      await runPlayerOperation(() => player.jump(lineIndex),
-          isCurrent: () =>
-              requestId == _roomRequestId &&
-              urlRequestId == _playUrlRequestId &&
-              lineRequestId == _lineRequestId);
+      await runPlayerOperation(
+        () => player.jump(lineIndex),
+        isCurrent: () =>
+            requestId == _roomRequestId &&
+            urlRequestId == _playUrlRequestId &&
+            lineRequestId == _lineRequestId,
+      );
     } catch (e, stackTrace) {
       if (roomClosed ||
           requestId != _roomRequestId ||
@@ -1022,45 +1091,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   }
 
   void showFollowUserSheet() {
+    if (roomClosed) return;
     Utils.showBottomSheet(
-      title: "关注列表",
-      child: Obx(
-        () => Stack(
-          children: [
-            RefreshIndicator(
-              onRefresh: FollowService.instance.loadData,
-              child: ListView.builder(
-                itemCount: FollowService.instance.liveList.length,
-                itemBuilder: (_, i) {
-                  var item = FollowService.instance.liveList[i];
-                  return Obx(
-                    () => FollowUserItem(
-                      item: item,
-                      playing: rxSite.value.id == item.siteId &&
-                          rxRoomId.value == item.roomId,
-                      onTap: () {
-                        Get.back();
-                        resetRoom(Sites.allSites[item.siteId]!, item.roomId);
-                      },
-                    ),
-                  );
-                },
-              ),
-            ),
-            if (Platform.isLinux || Platform.isWindows || Platform.isMacOS)
-              Positioned(
-                right: 12,
-                bottom: 12,
-                child: Obx(
-                  () => DesktopRefreshButton(
-                    refreshing: FollowService.instance.updating.value,
-                    onPressed: FollowService.instance.loadData,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
+      title: "切换直播间",
+      child: RoomQuickSwitch(controller: this, close: () => Get.back()),
     );
   }
 
@@ -1169,6 +1203,23 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     _playbackReady = false;
     _cancelPlaybackRetry();
 
+    // Clear platform-specific data before any async stop/load can complete.
+    detail.value = null;
+    liveStatus.value = false;
+    online.value = 0;
+    followed.value = false;
+    qualites.clear();
+    playUrls.clear();
+    playHeaders = null;
+    _returnedQualities = null;
+    currentQuality = -1;
+    currentLineIndex = -1;
+    currentQualityInfo.value = '';
+    currentLineInfo.value = '';
+    _liveDurationTimer?.cancel();
+    liveDuration.value = '00:00:00';
+    disableAutoScroll.value = false;
+
     rxSite.value = site;
     rxRoomId.value = roomId;
     final requestId = ++_roomRequestId;
@@ -1185,8 +1236,10 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
 
     // 停止播放
     try {
-      await runPlayerOperation(() => player.stop(),
-          isCurrent: () => requestId == _roomRequestId);
+      await runPlayerOperation(
+        () => player.stop(),
+        isCurrent: () => requestId == _roomRequestId,
+      );
     } catch (e, stackTrace) {
       Log.e("停止旧直播流失败: $e", stackTrace);
     }
@@ -1271,10 +1324,14 @@ $errorStackTrace''');
     danmaku.onMessage = null;
     danmaku.onClose = null;
     danmaku.onReady = null;
-    unawaited(Future.sync(() => danmaku.stop())
-        .catchError((Object e, StackTrace stack) {
-      Log.e("关闭弹幕连接失败: $e", stack);
-    }));
+    unawaited(
+      Future.sync(() => danmaku.stop()).catchError((
+        Object e,
+        StackTrace stack,
+      ) {
+        Log.e("关闭弹幕连接失败: $e", stack);
+      }),
+    );
   }
 
   @override
@@ -1288,6 +1345,8 @@ $errorStackTrace''');
     scrollController.removeListener(scrollListener);
     scrollController.dispose();
     autoExitTimer?.cancel();
+    _autoExitConfirmationTimer?.cancel();
+    ++_autoExitRequestId;
 
     _stopDanmaku();
     danmakuController = null;

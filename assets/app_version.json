@@ -1,7 +1,7 @@
 {
-  "version": "1.12.0",
-  "version_num": 11200,
-  "version_desc": "- 修复B站和抖音分类\n- 优化高频聊天消息和SC展示\n- 首页与分类同步平台选择\n- 提升播放切换与释放稳定性",
+  "version": "1.12.1",
+  "version_num": 11201,
+  "version_desc": "- 长按播放画面切换关注/观看历史\n- 修复跨平台切台残留和定时关闭竞态\n- 斗鱼减少自适应降档并显示实际清晰度",
   "prerelease": false,
-  "download_url": "https://github.com/Autsunset/dart_simple_live/releases/tag/android-v1.12.0"
+  "download_url": "https://github.com/Autsunset/dart_simple_live/releases/tag/android-v1.12.1"
 }

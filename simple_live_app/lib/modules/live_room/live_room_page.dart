@@ -30,77 +30,68 @@ class LiveRoomPage extends GetView<LiveRoomController> {
 
   @override
   Widget build(BuildContext context) {
-    final page = Obx(
-      () {
-        if (controller.loadError.value) {
-          return Scaffold(
-            appBar: AppBar(
-              title: const Text("直播间加载失败"),
+    final page = Obx(() {
+      if (controller.loadError.value) {
+        return Scaffold(
+          appBar: AppBar(title: const Text("直播间加载失败")),
+          body: Padding(
+            padding: AppStyle.edgeInsetsA12,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                LottieBuilder.asset(
+                  'assets/lotties/error.json',
+                  height: 140,
+                  repeat: false,
+                ),
+                const Text("直播间加载失败", textAlign: TextAlign.center),
+                AppStyle.vGap4,
+                Text(
+                  controller.error?.toString() ?? "未知错误",
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                AppStyle.vGap4,
+                Text(
+                  "${controller.rxSite.value.id} - ${controller.rxRoomId.value}",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    TextButton.icon(
+                      onPressed: controller.copyErrorDetail,
+                      icon: const Icon(Remix.file_copy_line),
+                      label: const Text("复制信息"),
+                    ),
+                    TextButton.icon(
+                      onPressed: controller.refreshRoom,
+                      icon: const Icon(Remix.refresh_line),
+                      label: const Text("刷新"),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            body: Padding(
-              padding: AppStyle.edgeInsetsA12,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  LottieBuilder.asset(
-                    'assets/lotties/error.json',
-                    height: 140,
-                    repeat: false,
-                  ),
-                  const Text(
-                    "直播间加载失败",
-                    textAlign: TextAlign.center,
-                  ),
-                  AppStyle.vGap4,
-                  Text(
-                    controller.error?.toString() ?? "未知错误",
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  AppStyle.vGap4,
-                  Text(
-                    "${controller.rxSite.value.id} - ${controller.rxRoomId.value}",
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      TextButton.icon(
-                        onPressed: controller.copyErrorDetail,
-                        icon: const Icon(Remix.file_copy_line),
-                        label: const Text("复制信息"),
-                      ),
-                      TextButton.icon(
-                        onPressed: controller.refreshRoom,
-                        icon: const Icon(Remix.refresh_line),
-                        label: const Text("刷新"),
-                      ),
-                    ],
-                  )
-                ],
-              ),
-            ),
-          );
-        }
-        if (controller.fullScreenState.value) {
-          return PopScope(
-            canPop: false,
-            onPopInvokedWithResult: (e, r) {
-              controller.exitFull();
-            },
-            child: Scaffold(
-              body: buildMediaPlayer(),
-            ),
-          );
-        } else {
-          return buildPageUI();
-        }
-      },
-    );
+          ),
+        );
+      }
+      if (controller.fullScreenState.value) {
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (e, r) {
+            controller.exitFull();
+          },
+          child: Scaffold(body: buildMediaPlayer()),
+        );
+      } else {
+        return buildPageUI();
+      }
+    });
     if (!Platform.isAndroid) {
       return page;
     }
@@ -116,9 +107,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
       builder: (context, orientation) {
         return Scaffold(
           appBar: AppBar(
-            title: Obx(
-              () => Text(controller.detail.value?.title ?? "直播间"),
-            ),
+            title: Obx(() => Text(controller.detail.value?.title ?? "直播间")),
             actions: buildAppbarActions(context),
           ),
           body: orientation == Orientation.portrait
@@ -132,10 +121,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   Widget buildPhoneUI(BuildContext context) {
     return Column(
       children: [
-        AspectRatio(
-          aspectRatio: 16 / 9,
-          child: buildMediaPlayer(),
-        ),
+        AspectRatio(aspectRatio: 16 / 9, child: buildMediaPlayer()),
         buildUserProfile(context),
         buildMessageArea(),
         buildBottomActions(context),
@@ -149,16 +135,11 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         Expanded(
           child: Row(
             children: [
-              Expanded(
-                child: buildMediaPlayer(),
-              ),
+              Expanded(child: buildMediaPlayer()),
               SizedBox(
                 width: 300,
                 child: Column(
-                  children: [
-                    buildUserProfile(context),
-                    buildMessageArea(),
-                  ],
+                  children: [buildUserProfile(context), buildMessageArea()],
                 ),
               ),
             ],
@@ -167,11 +148,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         Container(
           decoration: BoxDecoration(
             color: Theme.of(context).cardColor,
-            border: Border(
-              top: BorderSide(
-                color: Colors.grey.withAlpha(25),
-              ),
-            ),
+            border: Border(top: BorderSide(color: Colors.grey.withAlpha(25))),
           ),
           padding: AppStyle.edgeInsetsV4.copyWith(
             bottom: AppStyle.bottomBarHeight + 4,
@@ -291,18 +268,11 @@ class LiveRoomPage extends GetView<LiveRoomController> {
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         border: Border(
-          top: BorderSide(
-            color: Colors.grey.withAlpha(25),
-          ),
-          bottom: BorderSide(
-            color: Colors.grey.withAlpha(25),
-          ),
+          top: BorderSide(color: Colors.grey.withAlpha(25)),
+          bottom: BorderSide(color: Colors.grey.withAlpha(25)),
         ),
       ),
-      padding: AppStyle.edgeInsetsA8.copyWith(
-        left: 12,
-        right: 12,
-      ),
+      padding: AppStyle.edgeInsetsA8.copyWith(left: 12, right: 12),
       child: Obx(
         () => Row(
           mainAxisAlignment: MainAxisAlignment.start,
@@ -332,10 +302,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                   AppStyle.vGap4,
                   Row(
                     children: [
-                      Image.asset(
-                        controller.site.logo,
-                        width: 20,
-                      ),
+                      Image.asset(controller.site.logo, width: 20),
                       AppStyle.hGap4,
                       Text(
                         controller.site.name,
@@ -353,16 +320,10 @@ class LiveRoomPage extends GetView<LiveRoomController> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
-                  Remix.fire_fill,
-                  size: 20,
-                  color: Colors.orange,
-                ),
+                const Icon(Remix.fire_fill, size: 20, color: Colors.orange),
                 AppStyle.hGap4,
                 Text(
-                  Utils.onlineToString(
-                    controller.detail.value?.online ?? 0,
-                  ),
+                  Utils.onlineToString(controller.detail.value?.online ?? 0),
                   style: const TextStyle(fontSize: 14),
                 ),
               ],
@@ -377,11 +338,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        border: Border(
-          top: BorderSide(
-            color: Colors.grey.withAlpha(25),
-          ),
-        ),
+        border: Border(top: BorderSide(color: Colors.grey.withAlpha(25))),
       ),
       padding: EdgeInsets.only(bottom: AppStyle.bottomBarHeight),
       child: Row(
@@ -434,85 +391,85 @@ class LiveRoomPage extends GetView<LiveRoomController> {
 
   Widget buildMessageArea() {
     return Expanded(
-      child: DefaultTabController(
-        length: controller.site.id == Constant.kBiliBili ? 4 : 3,
-        child: Column(
-          children: [
-            TabBar(
-              indicatorSize: TabBarIndicatorSize.tab,
-              labelPadding: EdgeInsets.zero,
-              indicatorWeight: 1.0,
-              tabs: [
-                const Tab(
-                  text: "聊天",
-                ),
-                if (controller.site.id == Constant.kBiliBili)
-                  Tab(
-                    child: Obx(
-                      () => Text(
-                        controller.superChats.isNotEmpty
-                            ? "SC(${controller.superChats.length})"
-                            : "SC",
+      child: Obx(
+        () => DefaultTabController(
+          key: ValueKey(controller.site.id),
+          length: controller.site.id == Constant.kBiliBili ? 4 : 3,
+          child: Column(
+            children: [
+              TabBar(
+                indicatorSize: TabBarIndicatorSize.tab,
+                labelPadding: EdgeInsets.zero,
+                indicatorWeight: 1.0,
+                tabs: [
+                  const Tab(text: "聊天"),
+                  if (controller.site.id == Constant.kBiliBili)
+                    Tab(
+                      child: Obx(
+                        () => Text(
+                          controller.superChats.isNotEmpty
+                              ? "SC(${controller.superChats.length})"
+                              : "SC",
+                        ),
                       ),
                     ),
-                  ),
-                const Tab(
-                  text: "关注",
-                ),
-                const Tab(
-                  text: "设置",
-                ),
-              ],
-            ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  Obx(
-                    () => Stack(
-                      children: [
-                        ListView.separated(
-                          controller: controller.scrollController,
-                          separatorBuilder: (_, i) => Obx(
-                            () => SizedBox(
-                              // *2与原来的EdgeInsets.symmetric(vertical: )做兼容
-                              height: AppSettingsController
-                                      .instance.chatTextGap.value *
-                                  2,
-                            ),
-                          ),
-                          padding: AppStyle.edgeInsetsA12,
-                          itemCount: controller.messages.length,
-                          itemBuilder: (_, i) {
-                            var item = controller.messages[i];
-                            return buildMessageItem(item);
-                          },
-                        ),
-                        Visibility(
-                          visible: controller.disableAutoScroll.value,
-                          child: Positioned(
-                            right: 12,
-                            bottom: 12,
-                            child: ElevatedButton.icon(
-                              onPressed: () {
-                                controller.disableAutoScroll.value = false;
-                                controller.chatScrollToBottom();
-                              },
-                              icon: const Icon(Icons.expand_more),
-                              label: const Text("最新"),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (controller.site.id == Constant.kBiliBili)
-                    buildSuperChats(),
-                  buildFollowList(),
-                  buildSettings(),
+                  const Tab(text: "关注"),
+                  const Tab(text: "设置"),
                 ],
               ),
-            ),
-          ],
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    Obx(
+                      () => Stack(
+                        children: [
+                          ListView.separated(
+                            controller: controller.scrollController,
+                            separatorBuilder: (_, i) => Obx(
+                              () => SizedBox(
+                                // *2与原来的EdgeInsets.symmetric(vertical: )做兼容
+                                height:
+                                    AppSettingsController
+                                        .instance
+                                        .chatTextGap
+                                        .value *
+                                    2,
+                              ),
+                            ),
+                            padding: AppStyle.edgeInsetsA12,
+                            itemCount: controller.messages.length,
+                            itemBuilder: (_, i) {
+                              var item = controller.messages[i];
+                              return buildMessageItem(item);
+                            },
+                          ),
+                          Visibility(
+                            visible: controller.disableAutoScroll.value,
+                            child: Positioned(
+                              right: 12,
+                              bottom: 12,
+                              child: ElevatedButton.icon(
+                                onPressed: () {
+                                  controller.disableAutoScroll.value = false;
+                                  controller.chatScrollToBottom();
+                                },
+                                icon: const Icon(Icons.expand_more),
+                                label: const Text("最新"),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (controller.site.id == Constant.kBiliBili)
+                      buildSuperChats(),
+                    buildFollowList(),
+                    buildSettings(),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -548,8 +505,10 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                         bottomRight: Radius.circular(12),
                       ),
                     ),
-                    padding:
-                        AppStyle.edgeInsetsA4.copyWith(left: 12, right: 12),
+                    padding: AppStyle.edgeInsetsA4.copyWith(
+                      left: 12,
+                      right: 12,
+                    ),
                     child: Text.rich(
                       TextSpan(
                         text: "${message.userName}：",
@@ -566,7 +525,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                                   ? Colors.white
                                   : AppColors.black333,
                             ),
-                          )
+                          ),
                         ],
                       ),
                     ),
@@ -587,7 +546,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                     style: TextStyle(
                       color: Get.isDarkMode ? Colors.white : AppColors.black333,
                     ),
-                  )
+                  ),
                 ],
               ),
             ),
@@ -632,10 +591,7 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         ),
         Padding(
           padding: AppStyle.edgeInsetsA12,
-          child: Text(
-            "聊天区",
-            style: Get.textTheme.titleSmall,
-          ),
+          child: Text("聊天区", style: Get.textTheme.titleSmall),
         ),
         SettingsCard(
           child: Column(
@@ -644,13 +600,14 @@ class LiveRoomPage extends GetView<LiveRoomController> {
               Obx(
                 () => SettingsNumber(
                   title: "文字大小",
-                  value:
-                      AppSettingsController.instance.chatTextSize.value.toInt(),
+                  value: AppSettingsController.instance.chatTextSize.value
+                      .toInt(),
                   min: 8,
                   max: 36,
                   onChanged: (e) {
-                    AppSettingsController.instance
-                        .setChatTextSize(e.toDouble());
+                    AppSettingsController.instance.setChatTextSize(
+                      e.toDouble(),
+                    );
                   },
                 ),
               ),
@@ -658,8 +615,8 @@ class LiveRoomPage extends GetView<LiveRoomController> {
               Obx(
                 () => SettingsNumber(
                   title: "上下间隔",
-                  value:
-                      AppSettingsController.instance.chatTextGap.value.toInt(),
+                  value: AppSettingsController.instance.chatTextGap.value
+                      .toInt(),
                   min: 0,
                   max: 12,
                   onChanged: (e) {
@@ -693,19 +650,13 @@ class LiveRoomPage extends GetView<LiveRoomController> {
         ),
         Padding(
           padding: AppStyle.edgeInsetsA12,
-          child: Text(
-            "更多设置",
-            style: Get.textTheme.titleSmall,
-          ),
+          child: Text("更多设置", style: Get.textTheme.titleSmall),
         ),
         SettingsCard(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SettingsAction(
-                title: "关键词屏蔽",
-                onTap: controller.showDanmuShield,
-              ),
+              SettingsAction(title: "关键词屏蔽", onTap: controller.showDanmuShield),
               AppStyle.divider,
               SettingsAction(
                 title: "弹幕设置",
@@ -741,7 +692,8 @@ class LiveRoomPage extends GetView<LiveRoomController> {
                 return Obx(
                   () => FollowUserItem(
                     item: item,
-                    playing: controller.rxSite.value.id == item.siteId &&
+                    playing:
+                        controller.rxSite.value.id == item.siteId &&
                         controller.rxRoomId.value == item.roomId,
                     onTap: () {
                       controller.resetRoom(
@@ -784,14 +736,10 @@ class LiveRoomPage extends GetView<LiveRoomController> {
   void showMore() {
     showModalBottomSheet(
       context: Get.context!,
-      constraints: const BoxConstraints(
-        maxWidth: 600,
-      ),
+      constraints: const BoxConstraints(maxWidth: 600),
       isScrollControlled: true,
       builder: (_) => Container(
-        padding: EdgeInsets.only(
-          bottom: AppStyle.bottomBarHeight,
-        ),
+        padding: EdgeInsets.only(bottom: AppStyle.bottomBarHeight),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

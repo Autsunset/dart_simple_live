@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,6 +20,8 @@ class _Settings extends AppSettingsController {
 class _Player extends Fake implements Player {
   final jumps = <int>[];
   int disposed = 0;
+  @override
+  Future<void> stop() async {}
 
   @override
   Future<void> open(Playable playable, {bool play = true}) async {}
@@ -38,6 +41,15 @@ class _Room extends LiveRoomController {
       );
 
   final testPlayer = _Player();
+  final autoExitAnswer = Completer<bool>();
+  var exitCalls = 0;
+  var delaySheetCalls = 0;
+  @override
+  Future<bool> showAutoExitConfirmation() => autoExitAnswer.future;
+  @override
+  void exitApplication() => exitCalls++;
+  @override
+  void showAutoExitSheet() => delaySheetCalls++;
 
   @override
   _Player get player => testPlayer;
@@ -47,6 +59,23 @@ class _Room extends LiveRoomController {
 
   @override
   Future<void> resetSystem() async {}
+}
+
+class _SwitchRoom extends _Room {
+  var loads = 0;
+  @override
+  void loadData() => loads++;
+}
+
+class _PlaySite extends Fake implements LiveSite {
+  @override
+  Future<LivePlayUrl> getPlayUrls({
+    required LiveRoomDetail detail,
+    required LivePlayQuality quality,
+  }) async => LivePlayUrl(
+    urls: ['https://example.invalid/low', 'https://example.invalid/original'],
+    qualities: ['高清', '原画1080P60'],
+  );
 }
 
 void main() {
@@ -300,4 +329,113 @@ void main() {
     room.onClose();
     await tester.pump();
   });
+  testWidgets('closing a room cancels the auto-exit confirmation timeout', (
+    tester,
+  ) async {
+    final room = _Room()
+      ..autoExitEnable.value = true
+      ..autoExitMinutes.value = 0;
+    room.setAutoExit();
+    await tester.pump(const Duration(seconds: 1));
+    room.onClose();
+    await tester.pump(const Duration(seconds: 12));
+    room.autoExitAnswer.complete(false);
+    await tester.pump();
+    expect(room.exitCalls, 0);
+  });
+  testWidgets('disabling auto-exit invalidates a pending dialog result', (
+    tester,
+  ) async {
+    final room = _Room()
+      ..autoExitEnable.value = true
+      ..autoExitMinutes.value = 0;
+    room.setAutoExit();
+    await tester.pump(const Duration(seconds: 1));
+    room.autoExitEnable.value = false;
+    room.setAutoExit();
+    room.autoExitAnswer.complete(false);
+    await tester.pump(const Duration(seconds: 12));
+    expect(room.exitCalls, 0);
+    room.onClose();
+    await tester.pump();
+  });
+  testWidgets('auto-exit timeout and late confirmation cause only one exit', (
+    tester,
+  ) async {
+    final room = _Room()
+      ..autoExitEnable.value = true
+      ..autoExitMinutes.value = 0;
+    room.setAutoExit();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 10));
+    expect(room.exitCalls, 1);
+    room.autoExitAnswer.complete(false);
+    await tester.pump();
+    expect(room.exitCalls, 1);
+    room.onClose();
+    await tester.pump();
+  });
+  testWidgets(
+    'quality label follows the actual server quality of the selected line',
+    (tester) async {
+      final room = _Room();
+      room.rxSite.value = Site(
+        id: 'douyu',
+        liveSite: _PlaySite(),
+        logo: '',
+        name: '斗鱼',
+      );
+      room.qualites.add(LivePlayQuality(quality: '原画1080P60', data: 0));
+      room.currentQuality = 0;
+      room.detail.value = LiveRoomDetail(
+        roomId: '1',
+        title: '',
+        cover: '',
+        userName: '',
+        userAvatar: '',
+        online: 0,
+        status: true,
+        url: '',
+      );
+      room.getPlayUrl();
+      await tester.pump();
+      expect(room.currentQualityInfo.value, '实际：高清');
+      room.changePlayLine(1);
+      await tester.pump();
+      expect(room.currentQualityInfo.value, '原画1080P60');
+      room.onClose();
+      await tester.pump();
+    },
+  );
+  testWidgets(
+    'switching platform clears old quality, stream and profile data',
+    (tester) async {
+      final room = _SwitchRoom();
+      room.qualites.add(LivePlayQuality(quality: 'old', data: 0));
+      room.playUrls.add('https://example.invalid/old');
+      room.currentQuality = 0;
+      room.currentLineIndex = 0;
+      room.currentQualityInfo.value = 'old quality';
+      room.currentLineInfo.value = 'old line';
+      room.liveStatus.value = true;
+      room.online.value = 10;
+      room.followed.value = true;
+      room.disableAutoScroll.value = true;
+      room.resetRoom(Sites.allSites['bilibili']!, '2');
+      expect(room.qualites, isEmpty);
+      expect(room.playUrls, isEmpty);
+      expect(room.currentQuality, -1);
+      expect(room.currentLineIndex, -1);
+      expect(room.currentQualityInfo.value, '');
+      expect(room.currentLineInfo.value, '');
+      expect(room.liveStatus.value, isFalse);
+      expect(room.online.value, 0);
+      expect(room.followed.value, isFalse);
+      expect(room.disableAutoScroll.value, isFalse);
+      await tester.pump();
+      expect(room.loads, 1);
+      room.onClose();
+      await tester.pump();
+    },
+  );
 }
