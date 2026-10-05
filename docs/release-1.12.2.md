@@ -17,6 +17,9 @@
 - App 全量回归 31 项通过，新增 8 项覆盖列表存储隔离、首次进入后多次状态通知、三个筛选反复刷新/切换、自定义标签、数据库重载/空列表通知、刷新完成时机、关闭页防护及空页面组件显示/隐藏。
 - 新增关注回归在修复前可复现失败；修复后全部通过。首次并行全量运行有一项测试进程 WebSocket 握手失败，改为串行运行后 31/31 通过。
 - App 静态检查无错误/警告，仅保留原有 3 条 `onReorder` 弃用提示。
+- 三种 ABI release APK 构建成功，签名与 1.12.1 一致，包名保持 `com.xycz.simple_live`，最低 Android 7.0/API 24；各架构版本码均递增。
+- 检查新编译 AOT、合并/strip 中间产物及 APK 中 `libapp.so` 的一致性，并确认每个包的 AOT 与上一版不同，排除仅修改版本号后误发旧代码；各包只含对应 ABI 的原生库，并包含 QuickJS。
+- APK 签名与 SHA-256 校验通过。签名证书 SHA-256：`b6bff70c0d93b6c3cf9e621103152c6d0976c3b48ca20aa21493df27f83a2a6f`。
 
 本轮没有连接手机或平板完成真机验证，不宣称直播接口或长期播放稳定性有新增改善。既有播放、聊天、历史切台和 Android 稳定性补丁继续保留。
 
@@ -27,6 +30,12 @@ https://github.com/Autsunset/dart_simple_live/releases/tag/android-v1.12.2
 多数手机、平板请选择 `SimpleLive-1.12.2-android-arm64-v8a-selfsigned.apk`。
 另外提供 ARMv7、x86_64 和 `SimpleLive-1.12.2-SHA256SUMS.txt`。
 
+| 架构 | 版本码 | 安装包大小 |
+| --- | --- | --- |
+| ARM64 | 13202 | 41,144,428 bytes |
+| ARMv7 | 12202 | 38,686,314 bytes |
+| x86_64 | 15202 | 46,131,177 bytes |
+
 本地构建方法沿用 [1.12.0 发布记录](release-1.12.0.md) 的 Flutter 3.44.0 / Dart 3.12.0 配置。
 
-本轮 Gradle 发行包和部分 Maven 依赖的 Java HTTPS 下载受阻，使用本机缓存的 Gradle 8.11.1、临时初始化脚本和本地 Maven 转发服务完成构建准备。脚本统一构建插件为 AGP 8.9.1 / Kotlin Gradle Plugin 2.2.20，构建期 `kotlin-reflect` 使用 2.1.20；转发服务从官方 Google Maven、Maven Central、Gradle Plugin Portal 和 Flutter 仓库获取缺失依赖，并复用本地缓存。仓库的 Gradle Wrapper、Dart 依赖锁和 pub-cache 源码未被修改。构建工具给出的 Gradle/AGP/Kotlin 后续兼容性提示不属于本次关注列表修复范围。
+本轮 Gradle 发行包和部分 Maven 依赖的 Java HTTPS 下载受阻，使用本机缓存的 Gradle 8.11.1、临时初始化脚本和本地 Maven 转发服务完成构建。脚本将插件构建依赖解析到 AGP 8.9.1 / Kotlin Gradle Plugin 2.2.20，构建期 `kotlin-reflect` 使用 2.1.20（App 声明的 Kotlin 插件版本仍是 2.1.0）；转发服务从官方 Google Maven、Maven Central、Gradle Plugin Portal 和 Flutter 仓库获取缺失依赖，并复用本地缓存。仓库的 Gradle Wrapper、Dart 依赖锁和 pub-cache 源码未被修改。构建工具给出的 Gradle/AGP/Kotlin 后续兼容性提示不属于本次关注列表修复范围。
