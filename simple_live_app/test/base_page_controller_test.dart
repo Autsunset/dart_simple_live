@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:get/get.dart';
 import 'package:simple_live_app/app/controller/base_controller.dart';
 
 class _Page extends BasePageController<int> {
@@ -20,39 +21,55 @@ class _Page extends BasePageController<int> {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  test('refresh supersedes a slower load and keeps pagination correct',
-      () async {
+  test('page results do not share mutable storage with their source', () async {
     final page = _Page();
-    final old = page.loadData();
-    final fresh = page.refreshData();
-    expect(page.requests.map((r) => r.page), [1, 1]);
-    page.requests[0].result.complete([1]);
-    await old;
-    expect(page.list, isEmpty);
-    expect(page.loadding, isTrue);
-    page.requests[1].result.complete([2]);
-    await fresh;
-    expect(page.list, [2]);
-    final more = page.loadData();
-    expect(page.requests.last.page, 2);
-    page.requests.last.result.complete([3]);
-    await more;
-    expect(page.list, [2, 3]);
+    final source = [1, 2];
+    final loaded = page.loadData();
+    page.requests.single.result.complete(source);
+    await loaded;
+    page.list.assignAll([3]);
+    expect(source, [1, 2]);
+    source.add(4);
+    expect(page.list, [3]);
     page.onDelete();
   });
-  test('stale errors and completion after disposal cannot mutate the page',
-      () async {
-    final page = _Page();
-    final old = page.loadData();
-    final fresh = page.refreshData();
-    page.requests[0].result.completeError(StateError('stale'));
-    await old;
-    expect(page.errors, isEmpty);
-    expect(page.loadding, isTrue);
-    page.onDelete();
-    page.requests[1].result.complete([2]);
-    await fresh;
-    expect(page.list, isEmpty);
-    expect(page.currentPage, 1);
-  });
+  test(
+    'refresh supersedes a slower load and keeps pagination correct',
+    () async {
+      final page = _Page();
+      final old = page.loadData();
+      final fresh = page.refreshData();
+      expect(page.requests.map((r) => r.page), [1, 1]);
+      page.requests[0].result.complete([1]);
+      await old;
+      expect(page.list, isEmpty);
+      expect(page.loadding, isTrue);
+      page.requests[1].result.complete([2]);
+      await fresh;
+      expect(page.list, [2]);
+      final more = page.loadData();
+      expect(page.requests.last.page, 2);
+      page.requests.last.result.complete([3]);
+      await more;
+      expect(page.list, [2, 3]);
+      page.onDelete();
+    },
+  );
+  test(
+    'stale errors and completion after disposal cannot mutate the page',
+    () async {
+      final page = _Page();
+      final old = page.loadData();
+      final fresh = page.refreshData();
+      page.requests[0].result.completeError(StateError('stale'));
+      await old;
+      expect(page.errors, isEmpty);
+      expect(page.loadding, isTrue);
+      page.onDelete();
+      page.requests[1].result.complete([2]);
+      await fresh;
+      expect(page.list, isEmpty);
+      expect(page.currentPage, 1);
+    },
+  );
 }

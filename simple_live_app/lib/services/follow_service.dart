@@ -140,12 +140,13 @@ class FollowService extends GetxService {
   Future<void> loadData({bool updateStatus = true}) async {
     var list = DBService.instance.getFollowList();
     getAllTagList();
+    followList.assignAll(list);
+    // Publish cached/database changes even before network status checks finish.
+    filterData();
     if (list.isEmpty) {
       updating.value = false;
-      followList.assignAll(list);
       return;
     }
-    followList.assignAll(list);
     if (updateStatus) {
       startUpdateStatus();
     }

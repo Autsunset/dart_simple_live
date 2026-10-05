@@ -31,14 +31,15 @@ class FollowUserController extends BasePageController<FollowUser> {
   void onInit() {
     onUpdatedIndexedStream = EventBus.instance.listen(
       EventBus.kBottomNavigationBarClicked,
-          (index) {
+      (index) {
         if (index == 1) {
           scrollToTopOrRefresh();
         }
       },
     );
-    onUpdatedListStream =
-        FollowService.instance.updatedListStream.listen((event) {
+    onUpdatedListStream = FollowService.instance.updatedListStream.listen((
+      event,
+    ) {
       filterData();
     });
     super.onInit();
@@ -46,9 +47,11 @@ class FollowUserController extends BasePageController<FollowUser> {
 
   @override
   Future refreshData() async {
+    if (isClosed) return;
     await FollowService.instance.loadData();
+    if (isClosed) return;
     updateTagList();
-    super.refreshData();
+    await super.refreshData();
   }
 
   @override
@@ -56,15 +59,19 @@ class FollowUserController extends BasePageController<FollowUser> {
     if (page > 1) {
       return Future.value([]);
     }
+    return _getFilteredData();
+  }
+
+  List<FollowUser> _getFilteredData() {
     if (filterMode.value.tag == "全部") {
-      return FollowService.instance.followList.value;
+      return FollowService.instance.followList.toList();
     } else if (filterMode.value.tag == "直播中") {
-      return FollowService.instance.liveList.value;
+      return FollowService.instance.liveList.toList();
     } else if (filterMode.value.tag == "未开播") {
-      return FollowService.instance.notLiveList.value;
+      return FollowService.instance.notLiveList.toList();
     } else {
       FollowService.instance.filterDataByTag(filterMode.value);
-      return FollowService.instance.curTagFollowList.value;
+      return FollowService.instance.curTagFollowList.toList();
     }
   }
 
@@ -79,16 +86,9 @@ class FollowUserController extends BasePageController<FollowUser> {
   }
 
   void filterData() {
-    if (filterMode.value.tag == "全部") {
-      list.assignAll(FollowService.instance.followList.value);
-    } else if (filterMode.value.tag == "直播中") {
-      list.assignAll(FollowService.instance.liveList.value);
-    } else if (filterMode.value.tag == "未开播") {
-      list.assignAll(FollowService.instance.notLiveList.value);
-    } else {
-      FollowService.instance.filterDataByTag(filterMode.value);
-      list.assignAll(FollowService.instance.curTagFollowList);
-    }
+    if (isClosed) return;
+    list.value = _getFilteredData();
+    pageEmpty.value = list.isEmpty;
   }
 
   void setFilterMode(FollowUserTag tag) {
@@ -97,13 +97,15 @@ class FollowUserController extends BasePageController<FollowUser> {
   }
 
   void removeItem(FollowUser item) async {
-    var result =
-    await Utils.showAlertDialog("确定要取消关注${item.userName}吗?", title: "取消关注");
+    var result = await Utils.showAlertDialog(
+      "确定要取消关注${item.userName}吗?",
+      title: "取消关注",
+    );
     if (!result) {
       return;
     }
     // 取消关注同时删除标签内的 userId
-    if(item.tag != "全部"){
+    if (item.tag != "全部") {
       var tag = tagList.firstWhere((tag) => tag.tag == item.tag);
       tag.userId.remove(item.id);
       updateTag(tag);
@@ -112,14 +114,14 @@ class FollowUserController extends BasePageController<FollowUser> {
     refreshData();
   }
 
-  void updateItem(FollowUser item){
+  void updateItem(FollowUser item) {
     FollowService.instance.addFollow(item);
   }
+
   // 修改item的标签
   void setItemTag(FollowUser item, FollowUserTag targetTag) {
     FollowUserTag tarTag = targetTag;
-    FollowUserTag curTag =
-    tagList.firstWhere((tag) => tag.tag == item.tag);
+    FollowUserTag curTag = tagList.firstWhere((tag) => tag.tag == item.tag);
     // 从当前标签（非全部）删除item 向目标标签(全部包含所有item == 非全部)添加item
     curTag.userId.remove(item.id);
     tarTag.userId.addIf(!tarTag.userId.contains(item.id), item.id);
@@ -133,9 +135,9 @@ class FollowUserController extends BasePageController<FollowUser> {
 
   Future<void> removeTag(FollowUserTag tag) async {
     // 将tag下的所有follow设置为全部
-    for(var i in tag.userId){
+    for (var i in tag.userId) {
       var follow = DBService.instance.followBox.get(i);
-      if(follow != null){
+      if (follow != null) {
         follow.tag = "全部";
         updateItem(follow);
       }
@@ -152,7 +154,7 @@ class FollowUserController extends BasePageController<FollowUser> {
   }
 
   void updateTag(FollowUserTag followUserTag) {
-    if(followUserTag.tag == '全部'){
+    if (followUserTag.tag == '全部') {
       return;
     }
     FollowService.instance.updateFollowUserTag(followUserTag);
@@ -171,9 +173,9 @@ class FollowUserController extends BasePageController<FollowUser> {
     final FollowUserTag newTag = followUserTag.copyWith(tag: newTagName);
     updateTag(newTag);
     // update item's tag when update tagName
-    for(var i in newTag.userId){
+    for (var i in newTag.userId) {
       var follow = DBService.instance.followBox.get(i);
-      if(follow != null){
+      if (follow != null) {
         follow.tag = newTagName;
         updateItem(follow);
       }
@@ -195,6 +197,7 @@ class FollowUserController extends BasePageController<FollowUser> {
   @override
   void onClose() {
     onUpdatedIndexedStream?.cancel();
+    onUpdatedListStream?.cancel();
     super.onClose();
   }
 }

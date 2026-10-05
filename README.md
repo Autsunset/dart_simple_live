@@ -1,5 +1,5 @@
 > 此 fork 提供 Android 安装包：[下载新版](https://github.com/Autsunset/dart_simple_live/releases)。
-> 当前版本：1.12.1，更新与验证说明见 [发布记录](docs/release-1.12.1.md)。
+> 当前版本：1.12.2，更新与验证说明见 [发布记录](docs/release-1.12.2.md)。
 
 
 <p align="center">

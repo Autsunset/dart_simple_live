@@ -99,7 +99,8 @@ class BasePageController<T> extends BaseController {
       }
       // 赋值数据
       if (page == 1) {
-        list.value = result;
+        // The page owns its storage; filtering must not clear a service's list.
+        list.value = List<T>.of(result);
       } else {
         list.addAll(result);
       }
