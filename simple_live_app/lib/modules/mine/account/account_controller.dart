@@ -7,7 +7,6 @@ import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/routes/route_path.dart';
 import 'package:simple_live_app/services/bilibili_account_service.dart';
 import 'package:simple_live_app/services/douyin_account_service.dart';
-import 'package:simple_live_core/simple_live_core.dart';
 
 class AccountController extends GetxController {
   void bilibiliTap() async {
@@ -79,69 +78,50 @@ class AccountController extends GetxController {
     await BiliBiliAccountService.instance.loadUserInfo();
   }
 
-  void douyinTap() async {
-    if (DouyinAccountService.instance.hasCookie.value) {
-      var result = await Utils.showAlertDialog("确定要清除自定义 ttwid 吗？", title: "清除配置");
-      if (result) {
-        DouyinAccountService.instance.clearCookie();
-        SmartDialog.showToast("已清除自定义 ttwid，将使用默认 ttwid");
-      }
-    } else {
-      doDouyinCookieConfig();
-    }
-  }
+  void douyinTap() => doDouyinCookieConfig();
 
   void doDouyinCookieConfig() {
-    // 初始化文本框时，只显示 ttwid 的值部分
     var savedCookie = DouyinAccountService.instance.cookie;
-    var displayText = savedCookie;
-    if (savedCookie.startsWith('ttwid=')) {
-      displayText = savedCookie.substring(6); // 去掉 "ttwid="
-    }
-    var controller = TextEditingController(text: displayText);
+    var controller = TextEditingController(text: savedCookie);
 
     Get.dialog(
       AlertDialog(
-        title: const Text("配置抖音 ttwid"),
+        title: const Text("配置抖音 Cookie"),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                "默认已内置有效的 ttwid，可观看所有画质（包括蓝光）。\n如有需要可自定义配置。",
+                "关键词搜索需要登录状态，仅 ttwid 不代表已登录。\n"
+                "可在搜索页打开「网页搜索 / 登录」，登录后保存；也可粘贴抖音网页的完整 Cookie。\n"
+                "Cookie 包含登录凭据，请勿分享给他人。留空则清除配置。",
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: controller,
                 maxLines: 3,
+                autocorrect: false,
+                enableSuggestions: false,
                 decoration: const InputDecoration(
-                  hintText: "请粘贴 ttwid 值（留空则使用默认值）",
+                  hintText: "完整 Cookie（兼容单独的 ttwid 值）",
                   border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 8),
               TextButton.icon(
                 onPressed: () {
-                  // 提取 ttwid 的值部分（去掉 "ttwid=" 前缀）
-                  var defaultValue = DouyinSite.kDefaultCookie;
-                  if (defaultValue.startsWith('ttwid=')) {
-                    defaultValue = defaultValue.substring(6); // 去掉 "ttwid="
-                  }
-                  controller.text = defaultValue;
+                  controller.clear();
                 },
                 icon: const Icon(Icons.restore),
-                label: const Text("恢复默认 ttwid"),
+                label: const Text("清除配置"),
               ),
             ],
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Get.back(),
-            child: const Text("取消"),
-          ),
+          TextButton(onPressed: () => Get.back(), child: const Text("取消")),
           TextButton(
             onPressed: () {
               var input = controller.text.trim();
@@ -150,19 +130,14 @@ class AccountController extends GetxController {
                 DouyinAccountService.instance.clearCookie();
                 SmartDialog.showToast("已清除自定义 Cookie，将使用默认 ttwid");
               } else {
-                // 如果用户只输入了 ttwid 值，自动添加 "ttwid=" 前缀
-                var cookie = input;
-                if (!input.startsWith('ttwid=')) {
-                  cookie = 'ttwid=$input';
-                }
-                DouyinAccountService.instance.setCookie(cookie);
-                SmartDialog.showToast("ttwid 已保存");
+                DouyinAccountService.instance.setCookie(input);
+                SmartDialog.showToast("抖音 Cookie 已保存");
               }
             },
             child: const Text("确定"),
           ),
         ],
       ),
-    );
+    ).then((_) => controller.dispose());
   }
 }

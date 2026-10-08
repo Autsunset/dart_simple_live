@@ -1,7 +1,7 @@
 {
-  "version": "1.12.1",
-  "version_num": 11201,
-  "version_desc": "- 长按播放画面切换关注/观看历史\n- 修复跨平台切台残留和定时关闭竞态\n- 斗鱼减少自适应降档并显示实际清晰度",
+  "version": "1.12.3",
+  "version_num": 11203,
+  "version_desc": "- 抖音搜索识别登录要求，不再误显示空结果\n- 支持抖音房间号和直播间完整链接直接查询\n- 接通直播主播搜索、网页登录和完整 Cookie 配置",
   "prerelease": false,
-  "download_url": "https://github.com/Autsunset/dart_simple_live/releases/tag/android-v1.12.1"
+  "download_url": "https://github.com/Autsunset/dart_simple_live/releases/tag/android-v1.12.3"
 }

@@ -14,8 +14,10 @@ class AppSearchController extends GetxController
   var searchMode = 0.obs;
 
   AppSearchController() {
-    tabController =
-        TabController(length: Sites.supportSites.length, vsync: this);
+    tabController = TabController(
+      length: Sites.supportSites.length,
+      vsync: this,
+    );
     tabController.animation?.addListener(() {
       var currentIndex = (tabController.animation?.value ?? 0).round();
       if (index == currentIndex) {
@@ -23,12 +25,9 @@ class AppSearchController extends GetxController
       }
 
       index = currentIndex;
-      // if (Sites.supportSites[index].id == Constant.kDouyin) {
-      //   return;
-      // }
-
-      var controller =
-          Get.find<SearchListController>(tag: Sites.supportSites[index].id);
+      var controller = Get.find<SearchListController>(
+        tag: Sites.supportSites[index].id,
+      );
 
       if (controller.list.isEmpty &&
           !controller.pageEmpty.value &&
@@ -45,46 +44,34 @@ class AppSearchController extends GetxController
   @override
   void onInit() {
     for (var site in Sites.supportSites) {
-      // if (site.id == Constant.kDouyin) {
-      //   Get.put(DouyinSearchController(site));
-      // } else {
-      Get.put(
-        SearchListController(site),
-        tag: site.id,
-      );
-      //}
+      Get.put(SearchListController(site), tag: site.id);
     }
 
     super.onInit();
   }
 
   void doSearch() {
-    if (searchController.text.isEmpty) {
+    final keyword = searchController.text.trim();
+    if (keyword.isEmpty) {
       return;
     }
     for (var site in Sites.supportSites) {
-      // if (site.id == Constant.kDouyin) {
-      //   var controller = Get.find<DouyinSearchController>();
-      //   controller.keyword = searchController.text;
-      //   controller.searchMode.value = searchMode.value;
-      //   controller.reloadWebView();
-      // } else {
       var controller = Get.find<SearchListController>(tag: site.id);
       controller.clear();
-      controller.keyword = searchController.text;
+      controller.keyword = keyword;
       controller.searchMode.value = searchMode.value;
-      //}
     }
-    // if (Sites.supportSites[index].id != Constant.kDouyin) {
-    var controller =
-        Get.find<SearchListController>(tag: Sites.supportSites[index].id);
+    var controller = Get.find<SearchListController>(
+      tag: Sites.supportSites[index].id,
+    );
     controller.refreshData();
-    //}
   }
 
   @override
   void onClose() {
     streamSubscription?.cancel();
+    searchController.dispose();
+    tabController.dispose();
     super.onClose();
   }
 }

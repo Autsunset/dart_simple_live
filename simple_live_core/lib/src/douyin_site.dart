@@ -644,6 +644,61 @@ class DouyinSite implements LiveSite {
     String keyword, {
     int page = 1,
   }) async {
+    final result = await _searchLiveRooms(keyword.trim(), page: page);
+    return LiveSearchRoomResult(
+      hasMore: result.hasMore,
+      items: result.items
+          .map(
+            (room) => LiveRoomItem(
+              roomId: room.roomId,
+              title: room.title,
+              cover: room.cover,
+              userName: room.userName,
+              online: room.online,
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  /// Only room numbers and official room links are direct lookups, not user IDs.
+  static String? parseRoomId(String input) {
+    final value = input.trim();
+    if (RegExp(r'^\d{1,20}$').hasMatch(value)) return value;
+    for (final match in RegExp(
+      r'(?:https?://)?(?:live\.douyin\.com|webcast\.amemv\.com)/[^\s<>]+',
+    ).allMatches(value)) {
+      // Do not match an official-looking suffix inside an unrelated hostname.
+      if (match.start > 0 &&
+          RegExp(r'[A-Za-z0-9_./@-]').hasMatch(value[match.start - 1])) {
+        continue;
+      }
+      var url = match.group(0)!;
+      if (!url.startsWith('http')) url = 'https://$url';
+      final uri = Uri.tryParse(url);
+      if (uri == null) continue;
+      final path = uri.path;
+      final room = uri.host == 'live.douyin.com'
+          ? RegExp(r'^/(\d{1,20})/?$').firstMatch(path)
+          : RegExp(r'^/webcast/reflow/(\d{1,20})/?$').firstMatch(path);
+      if (room != null) return room.group(1);
+    }
+    return null;
+  }
+
+  Future<({List<LiveRoomDetail> items, bool hasMore})> _searchLiveRooms(
+    String keyword, {
+    required int page,
+  }) async {
+    if (keyword.isEmpty) {
+      return (items: <LiveRoomDetail>[], hasMore: false);
+    }
+    final roomId = parseRoomId(keyword);
+    if (roomId != null) {
+      if (page > 1) return (items: <LiveRoomDetail>[], hasMore: false);
+      final room = await getRoomDetail(roomId: roomId);
+      return (items: [room], hasMore: false);
+    }
     String serverUrl = "https://www.douyin.com/aweme/v1/web/live/search/";
     var uri = Uri.parse(serverUrl).replace(
       scheme: "https",
@@ -684,31 +739,16 @@ class DouyinSite implements LiveSite {
         "webid": "7382872326016435738",
       },
     );
-    //var requlestUrl = await getAbogusUrl(uri.toString());
-    var requlestUrl = uri.toString();
-    var headResp = await HttpClient.instance.head(
-      'https://live.douyin.com',
-      header: headers,
-    );
-    var dyCookie = "";
-    headResp.headers["set-cookie"]?.forEach((element) {
-      var cookie = element.split(";")[0];
-      if (cookie.contains("ttwid")) {
-        dyCookie += "$cookie;";
-      }
-      if (cookie.contains("__ac_nonce")) {
-        dyCookie += "$cookie;";
-      }
-    });
-
-    var result = await HttpClient.instance.getJson(
-      requlestUrl,
-      queryParameters: {},
+    // A logged-in session must not depend on an unrelated anonymous HEAD request.
+    final requestHeaders = await getRequestHeaders();
+    // Decode here: verification pages can be HTML despite a JSON content type.
+    dynamic result = await HttpClient.instance.getText(
+      uri.toString(),
       header: {
         "Authority": 'www.douyin.com',
         'accept': 'application/json, text/plain, */*',
         'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'cookie': cookie.isNotEmpty ? cookie : dyCookie,
+        'cookie': requestHeaders['cookie'],
         'priority': 'u=1, i',
         'referer':
             'https://www.douyin.com/search/${Uri.encodeComponent(keyword)}?type=live',
@@ -722,22 +762,78 @@ class DouyinSite implements LiveSite {
         'user-agent': kDefaultUserAgent,
       },
     );
-    if (result == "" || result == 'blocked') {
-      throw Exception("抖音直播搜索被限制，请稍后再试");
+    const searchHelp = "请使用网页搜索并登录，或在账号管理中配置完整抖音 Cookie";
+    if (result is String) {
+      try {
+        result = jsonDecode(result);
+      } on FormatException {
+        throw Exception("抖音搜索被限制或返回异常，$searchHelp");
+      }
     }
-    var items = <LiveRoomItem>[];
-    for (var item in result["data"] ?? []) {
-      var itemData = json.decode(item["lives"]["rawdata"].toString());
-      var roomItem = LiveRoomItem(
-        roomId: itemData["owner"]["web_rid"].toString(),
-        title: itemData["title"].toString(),
-        cover: itemData["cover"]["url_list"][0].toString(),
-        userName: itemData["owner"]["nickname"].toString(),
-        online: int.tryParse(itemData["stats"]["total_user"].toString()) ?? 0,
+    if (result is! Map) {
+      throw Exception("抖音搜索返回异常，$searchHelp");
+    }
+    final status = result['status_code']?.toString();
+    if (status == '2483') {
+      throw Exception("抖音搜索需要登录，$searchHelp；仅 ttwid 不能代表已登录");
+    }
+    if (status != null && status != '0') {
+      throw Exception("抖音搜索失败（$status），$searchHelp");
+    }
+    final data = result['data'];
+    if (data is! List) {
+      throw Exception("抖音搜索未返回有效列表，$searchHelp");
+    }
+    final items = <LiveRoomDetail>[];
+    final seen = <String>{};
+    for (final item in data) {
+      if (item is! Map || item['lives'] is! Map) continue;
+      dynamic room = item['lives']['rawdata'];
+      if (room is String) {
+        try {
+          room = jsonDecode(room);
+        } on FormatException {
+          continue;
+        }
+      }
+      if (room is! Map || room['owner'] is! Map) continue;
+      final owner = room['owner'] as Map;
+      final id = owner['web_rid']?.toString() ?? '';
+      if (id.isEmpty || id == '0' || !seen.add(id)) continue;
+      final stats = room['stats'];
+      items.add(
+        LiveRoomDetail(
+          roomId: id,
+          title: room['title']?.toString() ?? '',
+          cover: _searchImage(room['cover']),
+          userName: owner['nickname']?.toString() ?? '',
+          userAvatar: _searchImage(owner['avatar_thumb']),
+          online:
+              int.tryParse(
+                (stats is Map ? stats['total_user'] : null)?.toString() ?? '',
+              ) ??
+              0,
+          status: room['status'] == null || room['status'].toString() == '2',
+          url: 'https://live.douyin.com/$id',
+        ),
       );
-      items.add(roomItem);
     }
-    return LiveSearchRoomResult(hasMore: items.length >= 10, items: items);
+    if (data.isNotEmpty && items.isEmpty) {
+      throw Exception("抖音搜索结果格式已变化，$searchHelp");
+    }
+    final hasMore = result['has_more'];
+    return (
+      items: items,
+      hasMore: hasMore == null
+          ? data.length >= 10
+          : hasMore == true || hasMore.toString() == '1',
+    );
+  }
+
+  static String _searchImage(dynamic image) {
+    if (image is! Map || image['url_list'] is! List) return '';
+    final urls = image['url_list'] as List;
+    return urls.isEmpty ? '' : urls.first?.toString() ?? '';
   }
 
   @override
@@ -745,7 +841,21 @@ class DouyinSite implements LiveSite {
     String keyword, {
     int page = 1,
   }) async {
-    throw Exception("抖音暂不支持搜索主播，请直接搜索直播间");
+    // The live-search endpoint returns broadcasting anchors, not all profiles.
+    final result = await _searchLiveRooms(keyword.trim(), page: page);
+    return LiveSearchAnchorResult(
+      hasMore: result.hasMore,
+      items: result.items
+          .map(
+            (room) => LiveAnchorItem(
+              roomId: room.roomId,
+              avatar: room.userAvatar,
+              userName: room.userName,
+              liveStatus: room.status,
+            ),
+          )
+          .toList(),
+    );
   }
 
   @override

@@ -18,9 +18,7 @@ class SearchPage extends GetView<AppSearchController> {
           autofocus: true,
           decoration: InputDecoration(
             hintText: "搜点什么吧",
-            border: OutlineInputBorder(
-              borderRadius: AppStyle.radius24,
-            ),
+            border: OutlineInputBorder(borderRadius: AppStyle.radius24),
             contentPadding: AppStyle.edgeInsetsH12,
             prefixIcon: Row(
               mainAxisSize: MainAxisSize.min,
@@ -33,14 +31,8 @@ class SearchPage extends GetView<AppSearchController> {
                   () => DropdownButton<int>(
                     underline: const SizedBox(),
                     items: const [
-                      DropdownMenuItem(
-                        value: 0,
-                        child: Text("房间"),
-                      ),
-                      DropdownMenuItem(
-                        value: 1,
-                        child: Text("主播"),
-                      ),
+                      DropdownMenuItem(value: 0, child: Text("房间")),
+                      DropdownMenuItem(value: 1, child: Text("主播")),
                     ],
                     value: controller.searchMode.value,
                     onChanged: (e) {
@@ -71,10 +63,7 @@ class SearchPage extends GetView<AppSearchController> {
                   //text: e.name,
                   child: Row(
                     children: [
-                      Image.asset(
-                        e.logo,
-                        width: 24,
-                      ),
+                      Image.asset(e.logo, width: 24),
                       AppStyle.hGap8,
                       Text(e.name),
                     ],
@@ -90,17 +79,7 @@ class SearchPage extends GetView<AppSearchController> {
       body: TabBarView(
         physics: const NeverScrollableScrollPhysics(),
         controller: controller.tabController,
-        children: Sites.supportSites
-            .map((e) => SearchListView(
-                      e.id,
-                    )
-                // (e) => e.id == Constant.kDouyin
-                //     ? const DouyinSearchView()
-                //     : SearchListView(
-                //         e.id,
-                //       ),
-                )
-            .toList(),
+        children: Sites.supportSites.map((e) => SearchListView(e.id)).toList(),
       ),
     );
   }

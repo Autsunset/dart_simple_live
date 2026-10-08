@@ -11,17 +11,12 @@ class AccountPage extends GetView<AccountController> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("账号管理"),
-      ),
+      appBar: AppBar(title: const Text("账号管理")),
       body: ListView(
         children: [
           const Padding(
             padding: AppStyle.edgeInsetsA12,
-            child: Text(
-              "哔哩哔哩账号需要登录才能看高清晰度的直播。",
-              textAlign: TextAlign.center,
-            ),
+            child: Text("哔哩哔哩账号需要登录才能看高清晰度的直播。", textAlign: TextAlign.center),
           ),
           Obx(
             () => ListTile(
@@ -68,12 +63,12 @@ class AccountPage extends GetView<AccountController> {
                 height: 36,
               ),
               title: const Text("抖音直播"),
-              subtitle: Text(DouyinAccountService.instance.hasCookie.value
-                  ? "已自定义（${DouyinAccountService.instance.cookie.length} 字符）"
-                  : "使用默认 ttwid"),
-              trailing: DouyinAccountService.instance.hasCookie.value
-                  ? const Icon(Icons.delete_outline)
-                  : const Icon(Icons.chevron_right),
+              subtitle: Text(
+                DouyinAccountService.instance.hasCookie.value
+                    ? "已自定义（${DouyinAccountService.instance.cookie.length} 字符）"
+                    : "未配置登录 Cookie，关键词搜索需登录",
+              ),
+              trailing: const Icon(Icons.chevron_right),
               onTap: controller.douyinTap,
             ),
           ),
