@@ -67,6 +67,17 @@ class _SwitchRoom extends _Room {
   void loadData() => loads++;
 }
 
+class _AccountRoom extends _SwitchRoom {
+  final cookieResult = Completer<bool>();
+  int playRequests = 0;
+
+  @override
+  Future<bool> showDouyuCookieConfiguration() => cookieResult.future;
+
+  @override
+  void getPlayUrl() => playRequests++;
+}
+
 class _PlaySite extends Fake implements LiveSite {
   @override
   Future<LivePlayUrl> getPlayUrls({
@@ -88,6 +99,47 @@ void main() {
     );
   });
   tearDown(() => Get.reset());
+
+  test(
+    'saving Douyu cookies retries the selected quality without resetting it',
+    () async {
+      final room = _AccountRoom()..currentQuality = 2;
+      final configure = room.configureDouyuCookie();
+      room.cookieResult.complete(true);
+      await configure;
+      expect(room.playRequests, 1);
+      expect(room.currentQuality, 2);
+      room.onClose();
+    },
+  );
+
+  test('cancelled account configuration does not restart playback', () async {
+    final room = _AccountRoom();
+    final configure = room.configureDouyuCookie();
+    room.cookieResult.complete(false);
+    await configure;
+    expect(room.playRequests, 0);
+    room.onClose();
+  });
+
+  test(
+    'cookie dialog completion cannot reopen a closed or switched room',
+    () async {
+      final closed = _AccountRoom();
+      final closedResult = closed.configureDouyuCookie();
+      closed.onClose();
+      closed.cookieResult.complete(true);
+      await closedResult;
+      expect(closed.playRequests, 0);
+      final switched = _AccountRoom();
+      final switchedResult = switched.configureDouyuCookie();
+      switched.resetRoom(Sites.allSites['bilibili']!, '2');
+      switched.cookieResult.complete(true);
+      await switchedResult;
+      expect(switched.playRequests, 0);
+      switched.onClose();
+    },
+  );
 
   testWidgets(
     'chat history remains bounded even while automatic scrolling is disabled',

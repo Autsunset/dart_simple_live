@@ -1,7 +1,7 @@
 {
-  "version": "1.12.3",
-  "version_num": 11203,
-  "version_desc": "- 抖音搜索识别登录要求，不再误显示空结果\n- 支持抖音房间号和直播间完整链接直接查询\n- 接通直播主播搜索、网页登录和完整 Cookie 配置",
+  "version": "1.12.4",
+  "version_num": 11204,
+  "version_desc": "- 抖音恢复默认 ttwid 设置，支持房间号或链接直接进入\n- 斗鱼支持本人 Cookie 配置，保存后重试所选画质\n- 隐藏账号 Cookie 读写日志，保留服务端实际画质提示",
   "prerelease": false,
-  "download_url": "https://github.com/Autsunset/dart_simple_live/releases/tag/android-v1.12.3"
+  "download_url": "https://github.com/Autsunset/dart_simple_live/releases/tag/android-v1.12.4"
 }

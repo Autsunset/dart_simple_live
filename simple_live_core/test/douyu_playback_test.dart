@@ -49,6 +49,10 @@ class _Adapter implements HttpClientAdapter {
                 {'rate': 3, 'name': '超清'},
                 {'rate': 2, 'name': '高清'},
               ],
+              'cdnsWithName': [
+                {'cdn': 'first'},
+                {'cdn': 'last'},
+              ],
               'rtmp_url': 'https://$cdn.invalid',
               'rtmp_live': 'live.flv?rate=${args['rate']}&amp;token=ok',
             },
@@ -86,6 +90,46 @@ void main() {
     HttpClient.instance.dio.httpClientAdapter = adapter;
   });
   tearDown(() => HttpClient.instance.dio.httpClientAdapter = original);
+
+  test(
+    'quality discovery signs again with the currently configured cookie',
+    () async {
+      final site = _Site()..cookie = 'session=current; acf_did=current-device';
+      adapter.expectedCookie =
+          'session=current; acf_did=current-device; dy_did=current-device';
+      final qualities = await site.getPlayQualites(detail: detail);
+      expect(qualities.first.quality, '原画1080P60');
+      expect(site.signatures, 1);
+      final args = Uri.splitQueryString(adapter.requests.single.data as String);
+      expect(args['signature'], '1');
+      expect(args['rate'], '-1');
+      expect(
+        adapter.requests.single.data,
+        isNot(contains('expired-signature')),
+      );
+    },
+  );
+
+  test(
+    'clearing the cookie restores anonymous identity without leaking it to CDN headers',
+    () async {
+      final site = _Site()
+        ..cookie = 'acf_did=account-device; acf_auth=session'
+        ..deviceId = 'anonymous-device';
+      final quality = LivePlayQuality(
+        quality: '原画1080P60',
+        data: DouyuPlayData(0, ['first']),
+      );
+      await site.getPlayUrls(detail: detail, quality: quality);
+      site.cookie = '';
+      adapter.expectedCookie =
+          'dy_did=anonymous-device; acf_did=anonymous-device';
+      final result = await site.getPlayUrls(detail: detail, quality: quality);
+      expect(result.headers?.containsKey('cookie'), isFalse);
+      expect(result.headers.toString(), isNot(contains('session')));
+      expect(site.signatures, 2);
+    },
+  );
 
   test(
     'CDNs are concurrent, keep their order and survive one failed route',

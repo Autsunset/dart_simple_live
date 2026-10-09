@@ -10,12 +10,20 @@ class ParsePage extends GetView<ParseController> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("链接解析"),
-      ),
+      appBar: AppBar(title: const Text("链接解析")),
       body: ListView(
         padding: AppStyle.edgeInsetsA12,
         children: [
+          buildCard(
+            context: context,
+            child: ListTile(
+              leading: const Icon(Icons.play_circle_outline),
+              title: const Text("抖音房间号进入"),
+              subtitle: const Text("使用默认 ttwid，输入房间号直接打开播放器"),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: controller.enterDouyinRoom,
+            ),
+          ),
           buildCard(
             context: context,
             child: ExpansionTile(
@@ -33,9 +41,7 @@ class ParsePage extends GetView<ParseController> {
                     hintText: "输入或粘贴哔哩哔哩直播/虎牙直播/斗鱼直播/抖音直播的链接",
                     contentPadding: AppStyle.edgeInsetsA12,
                     enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(
-                        color: Colors.grey.withAlpha(50),
-                      ),
+                      borderSide: BorderSide(color: Colors.grey.withAlpha(50)),
                     ),
                   ),
                   onSubmitted: controller.jumpToRoom,
@@ -45,8 +51,9 @@ class ParsePage extends GetView<ParseController> {
                   width: double.infinity,
                   child: TextButton.icon(
                     onPressed: () {
-                      controller
-                          .jumpToRoom(controller.roomJumpToController.text);
+                      controller.jumpToRoom(
+                        controller.roomJumpToController.text,
+                      );
                     },
                     icon: const Icon(Remix.play_circle_line),
                     label: const Text("链接跳转"),
@@ -72,9 +79,7 @@ class ParsePage extends GetView<ParseController> {
                     hintText: "输入或粘贴哔哩哔哩直播/虎牙直播/斗鱼直播/抖音直播的链接",
                     contentPadding: AppStyle.edgeInsetsA12,
                     enabledBorder: OutlineInputBorder(
-                      borderSide: BorderSide(
-                        color: Colors.grey.withAlpha(50),
-                      ),
+                      borderSide: BorderSide(color: Colors.grey.withAlpha(50)),
                     ),
                   ),
                   onSubmitted: controller.getPlayUrl,
@@ -122,18 +127,11 @@ https://webcast.amemv.com/webcast/reflow/xxxxx
         borderRadius: AppStyle.radius8,
         boxShadow: Get.isDarkMode
             ? []
-            : [
-                BoxShadow(
-                  blurRadius: 8,
-                  color: Colors.grey.withAlpha(50),
-                )
-              ],
+            : [BoxShadow(blurRadius: 8, color: Colors.grey.withAlpha(50))],
       ),
       margin: AppStyle.edgeInsetsB12,
       child: Theme(
-        data: Theme.of(context).copyWith(
-          dividerColor: Colors.transparent,
-        ),
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: child,
       ),
     );

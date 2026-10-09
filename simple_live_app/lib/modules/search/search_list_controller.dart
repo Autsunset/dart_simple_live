@@ -1,9 +1,10 @@
 import 'package:get/get.dart';
 import 'package:simple_live_app/app/controller/base_controller.dart';
 import 'package:simple_live_app/app/sites.dart';
-import 'package:simple_live_app/modules/search/douyin/douyin_search_controller.dart';
-import 'package:simple_live_app/modules/search/douyin/douyin_search_view.dart';
+import 'package:simple_live_app/routes/app_navigation.dart';
 import 'package:simple_live_app/routes/route_path.dart';
+import 'package:simple_live_app/widgets/douyin_room_entry_dialog.dart';
+import 'package:simple_live_core/simple_live_core.dart';
 
 class SearchListController extends BasePageController {
   String keyword = "";
@@ -13,14 +14,14 @@ class SearchListController extends BasePageController {
   final Site site;
   SearchListController(this.site);
 
-  Future<void> openDouyinWebSearch() async {
-    final saved = await Get.to<bool>(
-      () => const DouyinSearchView(),
-      binding: BindingsBuilder.put(
-        () => DouyinSearchController(site, keyword: keyword),
+  Future<void> enterDouyinRoom() async {
+    final roomId = await Get.dialog<String>(
+      DouyinRoomEntryDialog(
+        initialValue: DouyinSite.parseRoomId(keyword) == null ? '' : keyword,
       ),
     );
-    if (saved == true && !isClosed) await refreshData();
+    if (roomId == null || isClosed) return;
+    AppNavigator.toLiveRoomDetail(site: site, roomId: roomId);
   }
 
   Future<void> configureDouyinCookie() async {

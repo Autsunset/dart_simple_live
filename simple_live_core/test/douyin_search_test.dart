@@ -84,6 +84,23 @@ void main() {
   });
 
   test(
+    'clearing a custom cookie restores the built-in anonymous ttwid',
+    () async {
+      final site = DouyinSite()..cookie = 'sessionid=fake';
+      expect((await site.getRequestHeaders())['cookie'], 'sessionid=fake');
+      site.cookie = '';
+      expect(
+        (await site.getRequestHeaders())['cookie'],
+        DouyinSite.kDefaultCookie,
+      );
+      expect(
+        DouyinSite.parseRoomId('https://live.douyin.com/916628331770'),
+        '916628331770',
+      );
+    },
+  );
+
+  test(
     'recognizes numbers and official room links, not usernames or hosts',
     () {
       for (final input in [
@@ -265,7 +282,7 @@ void main() {
         HttpClient.instance.dio.httpClientAdapter = _Adapter((_) => response);
         await expectLater(
           DouyinSite().searchRooms('name'),
-          throwsA(predicate((e) => e.toString().contains('网页搜索'))),
+          throwsA(predicate((e) => e.toString().contains('房间号'))),
         );
       },
     );

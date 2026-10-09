@@ -25,8 +25,7 @@ class DouyinSite implements LiveSite {
 
   static const String kDefaultAuthority = "live.douyin.com";
 
-  /// 默认 Cookie - 只需要 ttwid 字段即可获取所有画质（包括蓝光）
-  /// 经过测试验证，LOGIN_STATUS=1 等其他字段都是可选的
+  /// 访问公开直播间使用的默认匿名标识，不代表账号登录或付费权限。
   static const String kDefaultCookie =
       "ttwid=1%7CB1qls3GdnZhUov9o2NxOMxxYS2ff6OSvEWbv0ytbES4%7C1680522049%7C280d802d6d478e3e78d0c807f7c487e7ffec0ae4e5fdd6a0fe74c3c6af149511";
 
@@ -53,7 +52,7 @@ class DouyinSite implements LiveSite {
         return headers;
       }
 
-      // 使用默认的 ttwid cookie（只需要 ttwid 即可获取所有画质）
+      // 没有自定义配置时使用内置匿名 ttwid。
       headers["cookie"] = kDefaultCookie;
       return headers;
     } catch (e) {
@@ -762,7 +761,7 @@ class DouyinSite implements LiveSite {
         'user-agent': kDefaultUserAgent,
       },
     );
-    const searchHelp = "请使用网页搜索并登录，或在账号管理中配置完整抖音 Cookie";
+    const searchHelp = "请使用直播房间号或直播间完整链接直接进入";
     if (result is String) {
       try {
         result = jsonDecode(result);
@@ -775,7 +774,7 @@ class DouyinSite implements LiveSite {
     }
     final status = result['status_code']?.toString();
     if (status == '2483') {
-      throw Exception("抖音搜索需要登录，$searchHelp；仅 ttwid 不能代表已登录");
+      throw Exception("抖音关键词搜索需要登录，$searchHelp；房间号直进不经过关键词搜索");
     }
     if (status != null && status != '0') {
       throw Exception("抖音搜索失败（$status），$searchHelp");

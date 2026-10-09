@@ -120,6 +120,9 @@ class LocalStorageService extends GetxService {
   /// 抖音cookie
   static const String kDouyinCookie = "DouyinCookie";
 
+  /// 斗鱼可选登录 Cookie
+  static const String kDouyuCookie = "DouyuCookie";
+
   ///主题色
   static const String kStyleColor = "kStyleColor";
 
@@ -172,18 +175,14 @@ class LocalStorageService extends GetxService {
   late Box<String> shieldBox;
 
   Future init() async {
-    settingsBox = await Hive.openBox(
-      "LocalStorage",
-    );
-    shieldBox = await Hive.openBox(
-      "DanmuShield",
-    );
+    settingsBox = await Hive.openBox("LocalStorage");
+    shieldBox = await Hive.openBox("DanmuShield");
   }
 
   T getValue<T>(dynamic key, T defaultValue) {
     try {
       var value = settingsBox.get(key, defaultValue: defaultValue) as T;
-      Log.d("Get LocalStorage：$key\r\n$value");
+      Log.d("Get LocalStorage：$key\r\n${_logValue(key, value)}");
       return value;
     } catch (e) {
       Log.logPrint(e);
@@ -192,8 +191,15 @@ class LocalStorageService extends GetxService {
   }
 
   Future setValue<T>(dynamic key, T value) async {
-    Log.d("Set LocalStorage：$key\r\n$value");
+    Log.d("Set LocalStorage：$key\r\n${_logValue(key, value)}");
     return await settingsBox.put(key, value);
+  }
+
+  static Object? _logValue(dynamic key, Object? value) {
+    if (key == kBilibiliCookie || key == kDouyinCookie || key == kDouyuCookie) {
+      return '[redacted]';
+    }
+    return value;
   }
 
   Future removeValue<T>(dynamic key) async {

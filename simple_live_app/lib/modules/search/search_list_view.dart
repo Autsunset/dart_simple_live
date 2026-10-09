@@ -32,25 +32,22 @@ class SearchListView extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Obx(
-                    () => Text(
-                      controller.searchMode.value == 1
-                          ? "主播搜索仅返回直播搜索匹配的主播；房间号或直播间完整链接可直接查询。"
-                          : "可输入主播名、房间名、房间号或直播间完整链接。关键词搜索需登录，抖音号不等于房间号。",
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
+                  Text(
+                    "默认使用内置 ttwid。知道直播房间号即可直接进入，不经过关键词搜索；"
+                    "主播名、房间名搜索仍可能受平台限制。抖音号不等于直播房间号。",
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                   Wrap(
                     spacing: 12,
                     children: [
                       TextButton.icon(
-                        onPressed: controller.openDouyinWebSearch,
-                        icon: const Icon(Icons.public),
-                        label: const Text("网页搜索 / 登录"),
+                        onPressed: controller.enterDouyinRoom,
+                        icon: const Icon(Icons.play_circle_outline),
+                        label: const Text("房间号进入"),
                       ),
                       TextButton(
                         onPressed: controller.configureDouyinCookie,
-                        child: const Text("配置 Cookie"),
+                        child: const Text("ttwid 设置"),
                       ),
                     ],
                   ),

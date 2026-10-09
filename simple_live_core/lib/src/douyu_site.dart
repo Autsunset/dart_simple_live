@@ -137,7 +137,8 @@ class DouyuSite implements LiveSite {
   Future<List<LivePlayQuality>> getPlayQualites({
     required LiveRoomDetail detail,
   }) async {
-    var data = detail.data.toString();
+    // Account/device identity can change while the room remains open.
+    var data = await getPlayArgs(detail.roomId);
     data += "&cdn=&rate=-1&ver=Douyu_223061205&iar=0&ive=0&hevc=0&fa=0";
     List<LivePlayQuality> qualities = [];
     var result = await HttpClient.instance.postJson(

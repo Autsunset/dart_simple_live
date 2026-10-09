@@ -25,6 +25,7 @@ import 'package:simple_live_app/modules/settings/danmu_settings_page.dart';
 import 'package:simple_live_app/services/db_service.dart';
 import 'package:simple_live_app/services/follow_service.dart';
 import 'package:simple_live_app/modules/live_room/widgets/room_quick_switch.dart';
+import 'package:simple_live_app/widgets/douyu_cookie_dialog.dart';
 import 'package:simple_live_core/simple_live_core.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -923,6 +924,17 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     );
   }
 
+  Future<bool> showDouyuCookieConfiguration() => DouyuCookieDialog.configure();
+
+  Future<void> configureDouyuCookie() async {
+    if (roomClosed || site.id != Constant.kDouyu) return;
+    final requestId = _roomRequestId;
+    final saved = await showDouyuCookieConfiguration();
+    if (saved && !roomClosed && requestId == _roomRequestId) {
+      getPlayUrl();
+    }
+  }
+
   void showQualitySheet() {
     Utils.showBottomSheet(
       title: "切换清晰度",
@@ -934,8 +946,19 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
           getPlayUrl();
         },
         child: ListView.builder(
-          itemCount: qualites.length,
+          itemCount: qualites.length + (site.id == Constant.kDouyu ? 1 : 0),
           itemBuilder: (_, i) {
+            if (i == qualites.length) {
+              return ListTile(
+                leading: const Icon(Icons.account_circle_outlined),
+                title: const Text('原画受限？配置斗鱼 Cookie'),
+                subtitle: const Text('保存后按当前清晰度重新请求；仍受平台限制'),
+                onTap: () {
+                  Get.back();
+                  configureDouyuCookie();
+                },
+              );
+            }
             var item = qualites[i];
             return RadioListTile(value: i, title: Text(item.quality));
           },

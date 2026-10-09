@@ -4,18 +4,21 @@ import 'package:get/get.dart';
 import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/modules/mine/account/account_controller.dart';
-import 'package:simple_live_app/modules/search/douyin/douyin_search_controller.dart';
+import 'package:simple_live_app/modules/mine/parse/parse_controller.dart';
 import 'package:simple_live_app/modules/search/search_list_controller.dart';
 import 'package:simple_live_app/modules/search/search_list_view.dart';
+import 'package:simple_live_app/routes/route_path.dart';
 import 'package:simple_live_app/services/douyin_account_service.dart';
+import 'package:simple_live_app/widgets/douyin_room_entry_dialog.dart';
+import 'package:simple_live_core/simple_live_core.dart';
 
 class _SearchController extends SearchListController {
   _SearchController() : super(Sites.allSites[Constant.kDouyin]!);
-  int webSearches = 0;
+  int roomEntries = 0;
   int cookieSettings = 0;
 
   @override
-  Future<void> openDouyinWebSearch() async => webSearches++;
+  Future<void> enterDouyinRoom() async => roomEntries++;
 
   @override
   Future<void> configureDouyinCookie() async => cookieSettings++;
@@ -30,6 +33,18 @@ class _AccountService extends DouyinAccountService {
   void onInit() {
     cookie = 'sessionid=fake; ttwid=test';
     hasCookie.value = true;
+  }
+}
+
+class _NoSearchSite extends DouyinSite {
+  @override
+  Future<LiveSearchRoomResult> searchRooms(String keyword, {int page = 1}) {
+    throw StateError('Direct room entry must not call keyword search');
+  }
+
+  @override
+  Future<LiveSearchAnchorResult> searchAnchors(String keyword, {int page = 1}) {
+    throw StateError('Direct room entry must not call anchor search');
   }
 }
 
@@ -67,42 +82,21 @@ void main() {
   );
 
   testWidgets(
-    'existing full cookie can be edited without stripping its first key',
+    'default ttwid can be restored without corrupting existing custom input',
     (tester) async {
       Get.put<DouyinAccountService>(_AccountService());
       await tester.pumpWidget(const GetMaterialApp(home: Scaffold()));
       AccountController().doDouyinCookieConfig();
       await tester.pumpAndSettle();
-      expect(find.text('配置抖音 Cookie'), findsOneWidget);
+      expect(find.text('配置抖音 ttwid'), findsOneWidget);
       final field = tester.widget<TextField>(find.byType(TextField));
       expect(field.controller!.text, 'sessionid=fake; ttwid=test');
+      await tester.tap(find.text('恢复默认 ttwid'));
+      await tester.pump();
+      expect(field.controller!.text, '');
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-    },
-  );
-
-  test(
-    'web search opens the actual escaped keyword, including before view creation',
-    () {
-      final controller = DouyinSearchController(
-        Sites.allSites[Constant.kDouyin]!,
-        keyword: ' 主播 & #名字 ',
-      );
-      final uri = Uri.parse(controller.searchUrl);
-      expect(uri.host, 'www.douyin.com');
-      expect(uri.pathSegments.last, '主播 & #名字');
-      expect(uri.queryParameters['type'], 'live');
-      expect(uri.fragment, isEmpty);
-      expect(
-        controller.openRoom(Uri.parse('https://live.douyin.com/')),
-        isFalse,
-      );
-      controller.onDelete();
-      expect(
-        controller.openRoom(Uri.parse('https://live.douyin.com/123456789012')),
-        isFalse,
-      );
     },
   );
 
@@ -120,21 +114,153 @@ void main() {
           home: Scaffold(body: SearchListView(Constant.kDouyin)),
         ),
       );
-      expect(find.text('网页搜索 / 登录'), findsOneWidget);
-      expect(find.text('配置 Cookie'), findsOneWidget);
-      expect(find.textContaining('抖音号不等于房间号'), findsOneWidget);
+      expect(find.text('房间号进入'), findsOneWidget);
+      expect(find.text('ttwid 设置'), findsOneWidget);
+      expect(find.textContaining('抖音号不等于直播房间号'), findsOneWidget);
+      expect(find.text('网页搜索 / 登录'), findsNothing);
 
-      await tester.tap(find.text('网页搜索 / 登录'));
-      await tester.tap(find.text('配置 Cookie'));
-      expect(controller.webSearches, 1);
+      await tester.tap(find.text('房间号进入'));
+      await tester.tap(find.text('ttwid 设置'));
+      expect(controller.roomEntries, 1);
       expect(controller.cookieSettings, 1);
 
       controller.searchMode.value = 1;
       await tester.pump();
-      expect(find.textContaining('主播搜索仅返回'), findsOneWidget);
-      expect(find.text('网页搜索 / 登录'), findsOneWidget);
+      expect(find.text('房间号进入'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final input in [
+    ' 916628331770 ',
+    'https://live.douyin.com/916628331770?from=share',
+  ]) {
+    testWidgets('direct entry navigates without search or login: $input', (
+      tester,
+    ) async {
+      final site = Site(
+        id: Constant.kDouyin,
+        name: 'Douyin',
+        logo: '',
+        liveSite: _NoSearchSite(),
+      );
+      final controller = Get.put(SearchListController(site));
+      await tester.pumpWidget(
+        GetMaterialApp(
+          home: Scaffold(
+            body: TextButton(
+              onPressed: controller.enterDouyinRoom,
+              child: const Text('open'),
+            ),
+          ),
+          getPages: [
+            GetPage(
+              name: RoutePath.kLiveRoomDetail,
+              page: () =>
+                  Scaffold(body: Text('room:${Get.parameters['roomId']}')),
+            ),
+          ],
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField), input);
+      await tester.tap(find.text('进入直播间'));
+      await tester.pumpAndSettle();
+      expect(find.text('room:916628331770'), findsOneWidget);
+      expect(Get.arguments, same(site));
+      expect(Get.isRegistered<DouyinAccountService>(), isFalse);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+    'invalid room input stays in dialog and cancel does not navigate',
+    (tester) async {
+      final controller = Get.put(
+        SearchListController(Sites.allSites[Constant.kDouyin]!),
+      );
+      await tester.pumpWidget(
+        GetMaterialApp(
+          home: Scaffold(
+            body: TextButton(
+              onPressed: controller.enterDouyinRoom,
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('进入直播间'));
+      await tester.pumpAndSettle();
+      expect(find.text('请输入直播房间号或完整链接'), findsOneWidget);
+      await tester.enterText(find.byType(TextFormField), 'anchor name');
+      await tester.tap(find.text('进入直播间'));
+      await tester.pumpAndSettle();
+      expect(find.text('请输入数字房间号或支持的抖音直播间链接'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(find.byType(DouyinRoomEntryDialog), findsNothing);
+      expect(Get.currentRoute, '/');
+    },
+  );
+
+  testWidgets(
+    'tools use the same room entry without parsing a search keyword',
+    (tester) async {
+      final controller = Get.put(ParseController());
+      await tester.pumpWidget(
+        GetMaterialApp(
+          home: Scaffold(
+            body: TextButton(
+              onPressed: controller.enterDouyinRoom,
+              child: const Text('open'),
+            ),
+          ),
+          getPages: [
+            GetPage(
+              name: RoutePath.kLiveRoomDetail,
+              page: () =>
+                  Scaffold(body: Text('room:${Get.parameters['roomId']}')),
+            ),
+          ],
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField), '916628331770');
+      await tester.testTextInput.receiveAction(TextInputAction.go);
+      await tester.pumpAndSettle();
+      expect(find.text('room:916628331770'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'closing search while entry dialog is open prevents late navigation',
+    (tester) async {
+      final controller = Get.put(
+        SearchListController(Sites.allSites[Constant.kDouyin]!),
+      );
+      await tester.pumpWidget(
+        GetMaterialApp(
+          home: Scaffold(
+            body: TextButton(
+              onPressed: controller.enterDouyinRoom,
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      controller.onDelete();
+      await tester.enterText(find.byType(TextFormField), '916628331770');
+      await tester.tap(find.text('进入直播间'));
+      await tester.pumpAndSettle();
+      expect(Get.currentRoute, '/');
+      expect(find.byType(DouyinRoomEntryDialog), findsNothing);
     },
   );
 }

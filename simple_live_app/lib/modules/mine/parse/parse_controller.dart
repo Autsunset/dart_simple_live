@@ -7,10 +7,20 @@ import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/routes/app_navigation.dart';
+import 'package:simple_live_app/widgets/douyin_room_entry_dialog.dart';
 
 class ParseController extends GetxController {
   final TextEditingController roomJumpToController = TextEditingController();
   final TextEditingController getUrlController = TextEditingController();
+
+  Future<void> enterDouyinRoom() async {
+    final roomId = await Get.dialog<String>(const DouyinRoomEntryDialog());
+    if (roomId == null || isClosed) return;
+    AppNavigator.toLiveRoomDetail(
+      site: Sites.allSites[Constant.kDouyin]!,
+      roomId: roomId,
+    );
+  }
 
   void jumpToRoom(String e) async {
     if (e.isEmpty) {
@@ -21,7 +31,7 @@ class ParseController extends GetxController {
     FocusManager.instance.primaryFocus?.unfocus();
 
     var parseResult = await parse(e);
-    if (parseResult.isEmpty && parseResult.first == "") {
+    if (parseResult.isEmpty || parseResult.first == "") {
       SmartDialog.showToast("无法解析此链接");
       return;
     }
@@ -39,7 +49,7 @@ class ParseController extends GetxController {
       return;
     }
     var parseResult = await parse(e);
-    if (parseResult.isEmpty && parseResult.first == "") {
+    if (parseResult.isEmpty || parseResult.first == "") {
       SmartDialog.showToast("无法解析此链接");
       return;
     }
@@ -54,51 +64,52 @@ class ParseController extends GetxController {
 
         return;
       }
-      var result = await Get.dialog(SimpleDialog(
-        title: const Text("选择清晰度"),
-        children: qualites
-            .map(
-              (e) => ListTile(
-                title: Text(
-                  e.quality,
-                  textAlign: TextAlign.center,
+      var result = await Get.dialog(
+        SimpleDialog(
+          title: const Text("选择清晰度"),
+          children: qualites
+              .map(
+                (e) => ListTile(
+                  title: Text(e.quality, textAlign: TextAlign.center),
+                  onTap: () {
+                    Get.back(result: e);
+                  },
                 ),
-                onTap: () {
-                  Get.back(result: e);
-                },
-              ),
-            )
-            .toList(),
-      ));
+              )
+              .toList(),
+        ),
+      );
       if (result == null) {
         return;
       }
       SmartDialog.showLoading(msg: "");
-      var playUrl =
-          await site.liveSite.getPlayUrls(detail: detail, quality: result);
+      var playUrl = await site.liveSite.getPlayUrls(
+        detail: detail,
+        quality: result,
+      );
       SmartDialog.dismiss(status: SmartStatus.loading);
-      await Get.dialog(SimpleDialog(
-        title: const Text("选择线路"),
-        children: playUrl.urls
-            .map(
-              (e) => ListTile(
-                title: Text(
-                  "线路${playUrl.urls.indexOf(e) + 1}",
+      await Get.dialog(
+        SimpleDialog(
+          title: const Text("选择线路"),
+          children: playUrl.urls
+              .map(
+                (e) => ListTile(
+                  title: Text("线路${playUrl.urls.indexOf(e) + 1}"),
+                  subtitle: Text(
+                    e,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: e));
+                    Get.back();
+                    SmartDialog.showToast("已复制直链");
+                  },
                 ),
-                subtitle: Text(
-                  e,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () {
-                  Clipboard.setData(ClipboardData(text: e));
-                  Get.back();
-                  SmartDialog.showToast("已复制直链");
-                },
-              ),
-            )
-            .toList(),
-      ));
+              )
+              .toList(),
+        ),
+      );
     } catch (e) {
       SmartDialog.showToast("读取直链失败");
     } finally {
@@ -125,7 +136,7 @@ class ParseController extends GetxController {
     if (url.contains("douyu.com")) {
       var regExp = RegExp(r"douyu\.com/([\d|\w]+)");
       // 适配 topic_url
-      if(url.contains("topic")){
+      if (url.contains("topic")) {
         regExp = RegExp(r"[?&]rid=([\d]+)");
       }
       id = regExp.firstMatch(url)?.group(1) ?? "";
@@ -162,12 +173,7 @@ class ParseController extends GetxController {
   Future<String> getLocation(String url) async {
     try {
       if (url.isEmpty) return "";
-      await Dio().get(
-        url,
-        options: Options(
-          followRedirects: false,
-        ),
-      );
+      await Dio().get(url, options: Options(followRedirects: false));
     } on DioException catch (e) {
       if (e.response!.statusCode == 302) {
         var redirectUrl = e.response!.headers.value("Location");
