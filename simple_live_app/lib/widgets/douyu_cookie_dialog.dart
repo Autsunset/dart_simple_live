@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:get/get.dart';
 import 'package:simple_live_app/services/douyu_account_service.dart';
+import 'package:simple_live_app/widgets/cookie_file_import_button.dart';
 
 class DouyuCookieDialog extends StatefulWidget {
   final String initialValue;
@@ -58,8 +59,9 @@ class _DouyuCookieDialogState extends State<DouyuCookieDialog> {
             children: [
               const Text(
                 '普通观看可继续匿名使用；原画等高码率档位可能要求登录状态。\n'
-                '请在浏览器登录你本人的斗鱼账号，从开发者工具的网络请求头中复制完整 Cookie，'
-                '包含 acf_did，而不是仅复制设备 ID。\n'
+                '支持直接粘贴插件导出的 Netscape 文件内容、导入 cookies.txt，'
+                '或粘贴请求头的 name=value 格式。请导出 douyu.com 的 Cookie，包含 acf_did；'
+                '抖音 douyin.com 的 Cookie 不能用于斗鱼。\n'
                 '保存后仍由平台决定可用画质，不保证解除所有限制。',
               ),
               const SizedBox(height: 12),
@@ -70,12 +72,17 @@ class _DouyuCookieDialogState extends State<DouyuCookieDialog> {
                 autocorrect: false,
                 enableSuggestions: false,
                 decoration: const InputDecoration(
-                  hintText: 'acf_did=...; acf_auth=...; ...',
+                  hintText: '粘贴 Netscape 文件内容或 acf_did=...; acf_auth=...',
                   border: OutlineInputBorder(),
                   errorMaxLines: 2,
                 ),
                 validator: (value) =>
                     DouyuAccountService.validateCookie(value ?? ''),
+              ),
+              CookieFileImportButton(
+                controller: _input,
+                validate: DouyuAccountService.validateCookie,
+                normalize: DouyuAccountService.normalizeCookie,
               ),
               TextButton.icon(
                 onPressed: _input.clear,

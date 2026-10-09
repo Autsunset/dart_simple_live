@@ -7,6 +7,7 @@ import 'package:simple_live_app/app/utils.dart';
 import 'package:simple_live_app/routes/route_path.dart';
 import 'package:simple_live_app/services/bilibili_account_service.dart';
 import 'package:simple_live_app/services/douyin_account_service.dart';
+import 'package:simple_live_app/widgets/douyin_cookie_dialog.dart';
 import 'package:simple_live_app/widgets/douyu_cookie_dialog.dart';
 
 class AccountController extends GetxController {
@@ -83,66 +84,20 @@ class AccountController extends GetxController {
     await BiliBiliAccountService.instance.loadUserInfo();
   }
 
-  void douyinTap() => doDouyinCookieConfig();
+  Future<void> douyinTap() => doDouyinCookieConfig();
 
-  void doDouyinCookieConfig() {
-    var savedCookie = DouyinAccountService.instance.cookie;
-    var controller = TextEditingController(text: savedCookie);
-
-    Get.dialog(
-      AlertDialog(
-        title: const Text("配置抖音 ttwid"),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "默认已内置 ttwid，公开直播间可通过房间号直接进入，无需在应用内登录。\n"
-                "如有需要可自定义 ttwid；留空并保存即可恢复内置值。"
-                "仅恢复默认值不会解除平台对特殊直播间的访问限制。",
-                style: TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                maxLines: 3,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: const InputDecoration(
-                  hintText: "自定义 ttwid（留空使用内置默认值）",
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: () {
-                  controller.clear();
-                },
-                icon: const Icon(Icons.restore),
-                label: const Text("恢复默认 ttwid"),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Get.back(), child: const Text("取消")),
-          TextButton(
-            onPressed: () {
-              var input = controller.text.trim();
-              Get.back();
-              if (input.isEmpty) {
-                DouyinAccountService.instance.clearCookie();
-                SmartDialog.showToast("已恢复默认 ttwid");
-              } else {
-                DouyinAccountService.instance.setCookie(input);
-                SmartDialog.showToast("抖音配置已保存");
-              }
-            },
-            child: const Text("确定"),
-          ),
-        ],
-      ),
-    ).then((_) => controller.dispose());
+  Future<void> doDouyinCookieConfig() async {
+    final value = await Get.dialog<String>(
+      DouyinCookieDialog(initialValue: DouyinAccountService.instance.cookie),
+    );
+    if (value == null || isClosed) return;
+    try {
+      await DouyinAccountService.instance.setCookie(value);
+      if (!isClosed) {
+        SmartDialog.showToast(value.isEmpty ? '已恢复默认 ttwid' : '抖音配置已保存');
+      }
+    } catch (_) {
+      if (!isClosed) SmartDialog.showToast('保存失败，原有抖音配置未更改');
+    }
   }
 }

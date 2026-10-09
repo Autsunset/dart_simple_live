@@ -24,7 +24,7 @@ class DouyinDanmakuArgs {
       "webRid": webRid,
       "roomId": roomId,
       "userId": userId,
-      "cookie": cookie,
+      "cookie": "[redacted]",
     });
   }
 }
@@ -92,13 +92,26 @@ class DouyinDanmaku implements LiveDanmaku {
 
     var url = "$uri&signature=$sign";
     var backupUrl = url.replaceAll("webcast3-ws-web-lq", "webcast5-ws-web-lf");
+    final primaryCookies = CookieInput.headerFor(
+      danmakuArgs.cookie,
+      Uri.parse(url),
+    );
+    final backupCookies = CookieInput.headerFor(
+      danmakuArgs.cookie,
+      Uri.parse(backupUrl),
+    ).split('; ').toSet();
+    // The reconnect helper shares headers across both hosts.
+    final cookies = primaryCookies
+        .split('; ')
+        .where(backupCookies.contains)
+        .join('; ');
     print(url);
     webScoketUtils = WebScoketUtils(
       url: url,
       backupUrl: backupUrl,
       headers: {
         "User-Agnet": DouyinSite.kDefaultUserAgent,
-        "Cookie": danmakuArgs.cookie,
+        "Cookie": cookies.isEmpty ? DouyinSite.kDefaultCookie : cookies,
         "Origin": "https://live.douyin.com",
       },
       heartBeatTime: heartbeatTime,

@@ -1,7 +1,7 @@
 {
-  "version": "1.12.4",
-  "version_num": 11204,
-  "version_desc": "- 抖音恢复默认 ttwid 设置，支持房间号或链接直接进入\n- 斗鱼支持本人 Cookie 配置，保存后重试所选画质\n- 隐藏账号 Cookie 读写日志，保留服务端实际画质提示",
+  "version": "1.12.5",
+  "version_num": 11205,
+  "version_desc": "- 斗鱼和抖音支持粘贴 Netscape Cookie 内容或导入 cookies.txt\n- 保留 Cookie 原始编码，按域名、路径、协议和到期时间筛选\n- 导入失败不覆盖配置，保留默认 ttwid、房间号直进及普通 Cookie 输入",
   "prerelease": false,
-  "download_url": "https://github.com/Autsunset/dart_simple_live/releases/tag/android-v1.12.4"
+  "download_url": "https://github.com/Autsunset/dart_simple_live/releases/tag/android-v1.12.5"
 }

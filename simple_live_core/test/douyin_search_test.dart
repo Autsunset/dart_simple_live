@@ -84,6 +84,46 @@ void main() {
   });
 
   test(
+    'Netscape cookie headers are isolated by request domain and path',
+    () async {
+      final site = DouyinSite()
+        ..cookie =
+            '# Netscape HTTP Cookie File\n'
+            '.douyin.com\tTRUE\t/\tTRUE\t0\tsessionid\tshared\n'
+            'live.douyin.com\tFALSE\t/\tTRUE\t0\tfpk1\tlive-only\n'
+            'www.douyin.com\tFALSE\t/aweme\tTRUE\t0\tsearch_key\tsearch-only\n'
+            '.douyu.com\tTRUE\t/\tTRUE\t0\tacf_auth\twrong-platform\n';
+      final live = await site.getRequestHeaders();
+      final search = await site.getRequestHeaders(
+        url: 'https://www.douyin.com/aweme/v1/web/live/search/',
+      );
+      expect(live['cookie'], 'sessionid=shared; fpk1=live-only');
+      expect(search['cookie'], 'search_key=search-only; sessionid=shared');
+      expect(live['cookie'], isNot(contains('search-only')));
+      final share = await site.getRequestHeaders(
+        url: 'https://webcast.amemv.com/webcast/room/reflow/info/',
+      );
+      expect(share['cookie'], DouyinSite.kDefaultCookie);
+      HttpClient.instance.dio.httpClientAdapter = _Adapter((request) {
+        expect(request.headers['cookie'], search['cookie']);
+        return {'data': []};
+      });
+      await site.searchRooms('test');
+    },
+  );
+
+  test('danmaku diagnostic text does not expose cookies', () {
+    final args = DouyinDanmakuArgs(
+      webRid: '1',
+      roomId: '1',
+      userId: '1',
+      cookie: 'sessionid=private-session',
+    );
+    expect(args.toString(), isNot(contains('private-session')));
+    expect(jsonDecode(args.toString())['cookie'], '[redacted]');
+  });
+
+  test(
     'clearing a custom cookie restores the built-in anonymous ttwid',
     () async {
       final site = DouyinSite()..cookie = 'sessionid=fake';

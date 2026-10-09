@@ -70,6 +70,33 @@ class _Adapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+class _SignerAdapter implements HttpClientAdapter {
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    expect(options.uri.path, '/swf_api/homeH5Enc');
+    expect(options.headers['cookie'], isNot(contains('playback-only-secret')));
+    return ResponseBody.fromString(
+      jsonEncode({
+        'data': {
+          'room1':
+              'function ub98484234(rid,did,time){return JSON.stringify([rid,did]);}',
+        },
+      }),
+      200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 void main() {
   late _Adapter adapter;
   late HttpClientAdapter original;
@@ -90,6 +117,46 @@ void main() {
     HttpClient.instance.dio.httpClientAdapter = adapter;
   });
   tearDown(() => HttpClient.instance.dio.httpClientAdapter = original);
+
+  test(
+    'signing reads the playback device from Netscape instead of signing the file text',
+    () async {
+      HttpClient.instance.dio.httpClientAdapter = _SignerAdapter();
+      final site = DouyuSite()
+        ..deviceId = 'fallback-device'
+        ..cookie =
+            '# Netscape HTTP Cookie File\n'
+            'www.douyu.com\tFALSE\t/lapi\tTRUE\t0\tacf_did\tfile-device\n'
+            'www.douyu.com\tFALSE\t/lapi\tTRUE\t0\tacf_auth\tplayback-only-secret\n';
+      expect(jsonDecode(await site.getPlayArgs('1')), ['1', 'file-device']);
+    },
+  );
+
+  test(
+    'Netscape cookies are scoped and converted before playback requests',
+    () async {
+      final site = _Site()
+        ..cookie =
+            '# Netscape HTTP Cookie File\n'
+            '.douyu.com\tTRUE\t/\tFALSE\t0\tdy_did\tdevice\n'
+            'www.douyu.com\tFALSE\t/\tFALSE\t0\tacf_did\tdevice\n'
+            '#HttpOnly_www.douyu.com\tFALSE\t/lapi\tTRUE\t0\tacf_auth\ttoken%2F+==\n'
+            'passport.douyu.com\tFALSE\t/\tTRUE\t0\tpassport\tnot-for-playback\n'
+            '.douyin.com\tTRUE\t/\tTRUE\t0\tsessionid\twrong-platform\n'
+            'www.douyu.com\tFALSE\t/\tFALSE\t1\texpired\told-token\n';
+      adapter.expectedCookie =
+          'acf_auth=token%2F+==; dy_did=device; acf_did=device';
+      final result = await site.getPlayUrls(
+        detail: detail,
+        quality: LivePlayQuality(
+          quality: '原画',
+          data: DouyuPlayData(0, ['first']),
+        ),
+      );
+      expect(adapter.requests.single.headers['cookie'], isNot(contains('\t')));
+      expect(result.headers.toString(), isNot(contains('token%2F')));
+    },
+  );
 
   test(
     'quality discovery signs again with the currently configured cookie',

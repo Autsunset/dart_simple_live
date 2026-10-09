@@ -29,7 +29,7 @@ class DouyinSite implements LiveSite {
   static const String kDefaultCookie =
       "ttwid=1%7CB1qls3GdnZhUov9o2NxOMxxYS2ff6OSvEWbv0ytbES4%7C1680522049%7C280d802d6d478e3e78d0c807f7c487e7ffec0ae4e5fdd6a0fe74c3c6af149511";
 
-  /// 用户设置的 cookie
+  /// 用户设置的 Cookie 请求头或保留属性的 Netscape 文件。
   String cookie = "";
 
   void _logDebug(String msg) {
@@ -44,24 +44,12 @@ class DouyinSite implements LiveSite {
     "User-Agent": kDefaultUserAgent,
   };
 
-  Future<Map<String, dynamic>> getRequestHeaders() async {
-    try {
-      // 如果用户已设置 cookie，直接使用用户的 cookie
-      if (cookie.isNotEmpty) {
-        headers["cookie"] = cookie;
-        return headers;
-      }
-
-      // 没有自定义配置时使用内置匿名 ttwid。
-      headers["cookie"] = kDefaultCookie;
-      return headers;
-    } catch (e) {
-      CoreLog.error(e);
-      if (!(headers["cookie"]?.toString().isNotEmpty ?? false)) {
-        headers["cookie"] = kDefaultCookie;
-      }
-      return headers;
-    }
+  Future<Map<String, dynamic>> getRequestHeaders({
+    String url = kDefaultReferer,
+  }) async {
+    final value = CookieInput.headerFor(cookie, Uri.parse(url));
+    // Each request owns its headers; live/www requests can run concurrently.
+    return {...headers, 'cookie': value.isEmpty ? kDefaultCookie : value};
   }
 
   @override
@@ -159,7 +147,7 @@ class DouyinSite implements LiveSite {
 
     var result = await HttpClient.instance.getJson(
       requestUrl,
-      header: await getRequestHeaders(),
+      header: await getRequestHeaders(url: requestUrl),
     );
 
     var hasMore = (result["data"]["data"] as List).length >= 15;
@@ -214,7 +202,7 @@ class DouyinSite implements LiveSite {
 
     var result = await HttpClient.instance.getJson(
       requestUrl,
-      header: await getRequestHeaders(),
+      header: await getRequestHeaders(url: requestUrl),
     );
 
     var hasMore = (result["data"]["data"] as List).length >= 15;
@@ -300,7 +288,7 @@ class DouyinSite implements LiveSite {
         webRid: webRid,
         roomId: roomId,
         userId: userUniqueId,
-        cookie: headers["cookie"],
+        cookie: CookieInput.isNetscape(cookie) ? cookie : headers["cookie"],
       ),
       data: room["stream_url"],
     );
@@ -362,7 +350,7 @@ class DouyinSite implements LiveSite {
         webRid: webRid,
         roomId: roomId,
         userId: userUniqueId,
-        cookie: headers["cookie"],
+        cookie: CookieInput.isNetscape(cookie) ? cookie : headers["cookie"],
       ),
       data: roomStatus ? roomData["stream_url"] : {},
     );
@@ -406,7 +394,7 @@ class DouyinSite implements LiveSite {
         webRid: webRid,
         roomId: roomId,
         userId: userUniqueId,
-        cookie: headers["cookie"],
+        cookie: CookieInput.isNetscape(cookie) ? cookie : headers["cookie"],
       ),
       data: roomStatus ? room["stream_url"] : {},
     );
@@ -429,7 +417,7 @@ class DouyinSite implements LiveSite {
   Future<String> _getWebCookie(String webRid) async {
     var headResp = await HttpClient.instance.head(
       "https://live.douyin.com/$webRid",
-      header: headers,
+      header: await getRequestHeaders(url: 'https://live.douyin.com/$webRid'),
     );
     var dyCookie = "";
     headResp.headers["set-cookie"]?.forEach((element) {
@@ -451,15 +439,25 @@ class DouyinSite implements LiveSite {
   /// - [webRid] 直播间RID
   Future<Map> _getRoomDataByHtml(String webRid) async {
     var dyCookie = await _getWebCookie(webRid);
+    final requestHeaders = await getRequestHeaders(
+      url: 'https://live.douyin.com/$webRid',
+    );
+    final cookies = (requestHeaders['cookie'] as String)
+        .split(';')
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList();
+    for (final part in dyCookie.split(';')) {
+      if (!part.contains('=')) continue;
+      final name = part.split('=').first.trim();
+      cookies.removeWhere((existing) => existing.split('=').first == name);
+      cookies.add(part.trim());
+    }
+    requestHeaders['cookie'] = cookies.join('; ');
     var result = await HttpClient.instance.getText(
       "https://live.douyin.com/$webRid",
       queryParameters: {},
-      header: {
-        "Authority": kDefaultAuthority,
-        "Referer": kDefaultReferer,
-        "Cookie": dyCookie,
-        "User-Agent": kDefaultUserAgent,
-      },
+      header: requestHeaders,
     );
 
     var renderData =
@@ -482,7 +480,7 @@ class DouyinSite implements LiveSite {
     String serverUrl = "https://live.douyin.com/webcast/room/web/enter/";
 
     // 提前获取 headers
-    var requestHeader = await getRequestHeaders();
+    var requestHeader = await getRequestHeaders(url: serverUrl);
 
     // 使用动态 Referer（包含房间号，参考 DouyinLiveRecorder）
     requestHeader["Referer"] = "https://live.douyin.com/$webRid";
@@ -531,7 +529,9 @@ class DouyinSite implements LiveSite {
         "version_code": "99.99.99",
         "app_id": 6383,
       },
-      header: await getRequestHeaders(),
+      header: await getRequestHeaders(
+        url: 'https://webcast.amemv.com/webcast/room/reflow/info/',
+      ),
     );
     return result;
   }
@@ -739,7 +739,7 @@ class DouyinSite implements LiveSite {
       },
     );
     // A logged-in session must not depend on an unrelated anonymous HEAD request.
-    final requestHeaders = await getRequestHeaders();
+    final requestHeaders = await getRequestHeaders(url: uri.toString());
     // Decode here: verification pages can be HTML despite a JSON content type.
     dynamic result = await HttpClient.instance.getText(
       uri.toString(),

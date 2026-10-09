@@ -22,19 +22,22 @@ class DouyuAccountService extends GetxService {
   }
 
   static String normalizeCookie(String input) {
-    return input
-        .trim()
-        .replaceFirst(RegExp(r'^cookie:\s*', caseSensitive: false), '')
-        .replaceAll(RegExp(r'[\r\n]+'), ' ')
-        .split(';')
-        .map((part) => part.trim())
-        .where((part) => part.isNotEmpty)
-        .join('; ');
+    return CookieInput.normalizeForStorage(input, domain: 'douyu.com');
   }
 
   static String? validateCookie(String input) {
-    final value = normalizeCookie(input);
-    if (value.isEmpty) return null;
+    String value;
+    try {
+      final saved = normalizeCookie(input);
+      if (saved.isEmpty) return null;
+      value = CookieInput.headerFor(
+        saved,
+        Uri.parse('https://www.douyu.com/lapi/live/getH5Play/'),
+      );
+      if (value.isEmpty) return '文件没有适用于斗鱼直播接口的 Cookie，请重新导出';
+    } on FormatException catch (error) {
+      return error.message;
+    }
     var hasDevice = false;
     for (final part in value.split(';')) {
       final separator = part.indexOf('=');

@@ -8,6 +8,7 @@ import 'package:simple_live_app/app/constant.dart';
 import 'package:simple_live_app/app/log.dart';
 import 'package:simple_live_app/app/sites.dart';
 import 'package:simple_live_app/services/douyu_account_service.dart';
+import 'package:simple_live_app/services/douyin_account_service.dart';
 import 'package:simple_live_app/services/local_storage_service.dart';
 import 'package:simple_live_app/widgets/douyu_cookie_dialog.dart';
 import 'package:simple_live_core/simple_live_core.dart';
@@ -32,18 +33,22 @@ class _Box extends Fake implements Box<dynamic> {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final site = Sites.allSites[Constant.kDouyu]!.liveSite as DouyuSite;
+  final douyin = Sites.allSites[Constant.kDouyin]!.liveSite as DouyinSite;
   late String originalCookie;
+  late String originalDouyinCookie;
   late _Box box;
   late LocalStorageService storage;
 
   setUp(() {
     originalCookie = site.cookie;
+    originalDouyinCookie = douyin.cookie;
     box = _Box();
     storage = Get.put(LocalStorageService()..settingsBox = box);
     Log.debugLogs.clear();
   });
   tearDown(() {
     site.cookie = originalCookie;
+    douyin.cookie = originalDouyinCookie;
     Log.debugLogs.clear();
     Get.reset();
   });
@@ -54,6 +59,75 @@ void main() {
     expect(account.hasCookie.value, isFalse);
     expect(site.cookie, '');
   });
+
+  test(
+    'Netscape storage survives restart without losing scopes or logging values',
+    () async {
+      const file =
+          '# Netscape HTTP Cookie File\n'
+          'www.douyu.com\tFALSE\t/\tFALSE\t0\tacf_did\tdevice\n'
+          '#HttpOnly_www.douyu.com\tFALSE\t/\tTRUE\t0\tacf_auth\tfile-secret%2F+==\n'
+          '.douyin.com\tTRUE\t/\tTRUE\t0\tsessionid\tother-secret\n';
+      final account = Get.put(DouyuAccountService());
+      await account.setCookie(file);
+      final saved = box.entries[LocalStorageService.kDouyuCookie] as String;
+      expect(saved, startsWith('# Netscape HTTP Cookie File'));
+      expect(saved, isNot(contains('other-secret')));
+      await Get.delete<DouyuAccountService>(force: true);
+      final restored = Get.put(DouyuAccountService());
+      expect(restored.cookie, saved);
+      expect(site.cookie, saved);
+      expect(
+        CookieInput.headerFor(site.cookie, Uri.parse('https://www.douyu.com/')),
+        'acf_did=device; acf_auth=file-secret%2F+==',
+      );
+      expect(
+        Log.debugLogs.any((e) => e.content.contains('file-secret')),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'wrong-platform and expired files never overwrite saved Douyu cookies',
+    () async {
+      final account = Get.put(DouyuAccountService());
+      await account.setCookie('acf_did=old; acf_auth=valid');
+      for (final file in [
+        '.douyin.com\tTRUE\t/\tTRUE\t0\tttwid\twrong-platform',
+        'www.douyu.com\tFALSE\t/\tFALSE\t1\tacf_did\texpired',
+      ]) {
+        await expectLater(account.setCookie(file), throwsArgumentError);
+        expect(site.cookie, 'acf_did=old; acf_auth=valid');
+        expect(box.entries[LocalStorageService.kDouyuCookie], site.cookie);
+      }
+    },
+  );
+
+  test(
+    'Douyin imports Netscape, preserves previous state on failure, and can restore default',
+    () async {
+      final account = Get.put(DouyinAccountService());
+      await account.setCookie('.douyin.com\tTRUE\t/\tTRUE\t0\tttwid\t1%7Cfake');
+      expect((await douyin.getRequestHeaders())['cookie'], 'ttwid=1%7Cfake');
+      final saved = account.cookie;
+      await expectLater(
+        account.setCookie('www.douyu.com\tFALSE\t/\tFALSE\t0\tacf_did\twrong'),
+        throwsArgumentError,
+      );
+      expect(account.cookie, saved);
+      box.failWrites = true;
+      await expectLater(account.clearCookie(), throwsStateError);
+      expect(account.cookie, saved);
+      box.failWrites = false;
+      await account.clearCookie();
+      expect(
+        (await douyin.getRequestHeaders())['cookie'],
+        DouyinSite.kDefaultCookie,
+      );
+      expect(account.hasCookie.value, isFalse);
+    },
+  );
 
   test('restores stored cookie and updates the shared playback site', () {
     box.entries[LocalStorageService.kDouyuCookie] =

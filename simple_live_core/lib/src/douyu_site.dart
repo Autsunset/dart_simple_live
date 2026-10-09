@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:simple_live_core/src/common/http_client.dart';
 import 'package:simple_live_core/src/common/core_error.dart';
+import 'package:simple_live_core/src/common/cookie_input.dart';
 import 'package:simple_live_core/src/danmaku/douyu_danmaku.dart';
 import 'package:simple_live_core/src/interface/live_danmaku.dart';
 import 'package:simple_live_core/src/interface/live_site.dart';
@@ -20,7 +21,7 @@ import 'package:html_unescape/html_unescape.dart';
 import 'package:simple_live_core/src/scripts/douyu_sign.dart';
 
 class DouyuSite implements LiveSite {
-  /// Optional account cookie; anonymous requests also use a distinct device.
+  /// Optional Cookie header or Netscape file; anonymous requests use a distinct device.
   String cookie = '';
   String deviceId = '';
   static final String _processDeviceId = List.generate(
@@ -28,8 +29,11 @@ class DouyuSite implements LiveSite {
     (_) => Random.secure().nextInt(16).toRadixString(16),
   ).join();
 
-  String _cookieValue(String key) {
-    for (final part in cookie.split(';')) {
+  String _cookieHeader(String url) =>
+      CookieInput.headerFor(cookie, Uri.parse(url));
+
+  String _cookieValue(String header, String key) {
+    for (final part in header.split(';')) {
       final separator = part.indexOf('=');
       if (separator >= 0 && part.substring(0, separator).trim() == key) {
         return part.substring(separator + 1).trim();
@@ -38,8 +42,13 @@ class DouyuSite implements LiveSite {
     return '';
   }
 
-  String get _deviceDid {
-    final fromCookie = _cookieValue('acf_did');
+  String _deviceDid(String? roomId, {String? url}) {
+    final fromCookie = _cookieValue(
+      _cookieHeader(
+        url ?? 'https://www.douyu.com/lapi/live/getH5Play/${roomId ?? ''}',
+      ),
+      'acf_did',
+    );
     return fromCookie.isNotEmpty
         ? fromCookie
         : deviceId.isNotEmpty
@@ -47,11 +56,15 @@ class DouyuSite implements LiveSite {
         : _processDeviceId;
   }
 
-  Map<String, String> _requestHeaders([String? roomId]) {
+  Map<String, String> _requestHeaders(String? roomId, {String? url}) {
+    final target =
+        url ?? 'https://www.douyu.com/lapi/live/getH5Play/${roomId ?? ''}';
+    final header = _cookieHeader(target);
+    final did = _deviceDid(roomId, url: target);
     final cookies = <String>[
-      if (cookie.trim().isNotEmpty) cookie.trim(),
-      if (_cookieValue('dy_did').isEmpty) 'dy_did=$_deviceDid',
-      if (_cookieValue('acf_did').isEmpty) 'acf_did=$_deviceDid',
+      if (header.isNotEmpty) header,
+      if (_cookieValue(header, 'dy_did').isEmpty) 'dy_did=$did',
+      if (_cookieValue(header, 'acf_did').isEmpty) 'acf_did=$did',
     ];
     return {
       'referer': 'https://www.douyu.com/${roomId ?? ''}',
@@ -282,7 +295,10 @@ class DouyuSite implements LiveSite {
   Future<String> getPlayArgs(String roomId) async {
     final encoded = await HttpClient.instance.getText(
       'https://www.douyu.com/swf_api/homeH5Enc?rids=$roomId',
-      header: _requestHeaders(roomId),
+      header: _requestHeaders(
+        roomId,
+        url: 'https://www.douyu.com/swf_api/homeH5Enc',
+      ),
     );
     final decoded = json.decode(encoded);
     final payload = decoded is Map ? decoded['data'] : null;
@@ -290,7 +306,7 @@ class DouyuSite implements LiveSite {
     if (script is! String || script.isEmpty) {
       throw CoreError('斗鱼播放签名读取失败');
     }
-    return DouyuSign.getSign(script, roomId, _deviceDid);
+    return DouyuSign.getSign(script, roomId, _deviceDid(roomId));
   }
 
   @override
@@ -325,7 +341,10 @@ class DouyuSite implements LiveSite {
     Map h5RoomInfo = await HttpClient.instance.getJson(
       "https://www.douyu.com/swf_api/h5room/$roomId",
       queryParameters: {},
-      header: _requestHeaders(roomId),
+      header: _requestHeaders(
+        roomId,
+        url: 'https://www.douyu.com/swf_api/h5room/$roomId',
+      ),
     );
     String? showTime = h5RoomInfo["data"]?["show_time"]?.toString();
 
@@ -403,7 +422,10 @@ class DouyuSite implements LiveSite {
     var result = await HttpClient.instance.getJson(
       "https://www.douyu.com/betard/$roomId",
       queryParameters: {},
-      header: _requestHeaders(roomId),
+      header: _requestHeaders(
+        roomId,
+        url: 'https://www.douyu.com/betard/$roomId',
+      ),
     );
     Map roomInfo;
     if (result is String) {
