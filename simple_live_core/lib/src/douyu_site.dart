@@ -375,11 +375,13 @@ class DouyuSite implements LiveSite {
       userAvatar: roomInfo["owner_avatar"].toString(),
       introduction: roomInfo["show_details"].toString(),
       notice: "",
-      status: roomInfo["show_status"] == 1 && roomInfo["videoLoop"] != 1,
+      status:
+          roomInfo["show_status"].toString() == '1' &&
+          roomInfo["videoLoop"].toString() != '1',
       danmakuData: roomInfo["room_id"].toString(),
       data: await getPlayArgs(roomInfo["room_id"].toString()),
       url: "https://www.douyu.com/$roomId",
-      isRecord: roomInfo["videoLoop"] == 1,
+      isRecord: roomInfo["videoLoop"].toString() == '1',
       showTime: showTime,
     );
   }
@@ -427,11 +429,12 @@ class DouyuSite implements LiveSite {
         url: 'https://www.douyu.com/betard/$roomId',
       ),
     );
-    Map roomInfo;
-    if (result is String) {
-      roomInfo = json.decode(result)["room"];
-    } else {
-      roomInfo = result["room"];
+    final payload = result is String ? json.decode(result) : result;
+    final roomInfo = payload is Map ? payload["room"] : null;
+    if (roomInfo is! Map ||
+        !['1', '2'].contains(roomInfo['show_status']?.toString())) {
+      // An API error or missing state is unknown, not evidence of going offline.
+      throw CoreError('斗鱼直播状态读取失败，请稍后重试');
     }
     return roomInfo;
   }
@@ -490,7 +493,8 @@ class DouyuSite implements LiveSite {
   @override
   Future<bool> getLiveStatus({required String roomId}) async {
     var roomInfo = await _getRoomInfo(roomId);
-    return roomInfo["show_status"] == 1 && roomInfo["videoLoop"] != 1;
+    return roomInfo["show_status"].toString() == '1' &&
+        roomInfo["videoLoop"].toString() != '1';
   }
 
   int parseHotNum(String hn) {

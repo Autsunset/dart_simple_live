@@ -694,6 +694,7 @@ class PlayerController extends BaseController
   StreamSubscription? _heightSubscription;
   StreamSubscription? _logSubscription;
   StreamSubscription? _playingSubscription;
+  StreamSubscription<Duration>? _positionSubscription;
 
   void initStream() {
     _errorSubscription = player.stream.error.listen((event) {
@@ -721,6 +722,9 @@ class PlayerController extends BaseController
       if (event) {
         mediaEnd();
       }
+    });
+    _positionSubscription = player.stream.position.listen((position) {
+      if (!playerClosing) mediaProgress(position);
     });
     _logSubscription = player.stream.log.listen((event) {
       if (playerClosing) return;
@@ -750,7 +754,10 @@ class PlayerController extends BaseController
     _logSubscription?.cancel();
     _pipSubscription?.cancel();
     _playingSubscription?.cancel();
+    _positionSubscription?.cancel();
   }
+
+  void mediaProgress(Duration position) {}
 
   void mediaEnd() {
     WakelockPlus.disable();

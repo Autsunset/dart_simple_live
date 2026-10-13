@@ -6,6 +6,10 @@ class CookieInput {
   static const _httpOnlyPrefix = '#HttpOnly_';
   static final _namePattern = RegExp(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$");
   static final _controlPattern = RegExp(r'[\x00-\x1f\x7f]');
+  static final _copiedColumnsPattern = RegExp(
+    r'^(\S+)[ \t]+(\S+)[ \t]+(\S+)[ \t]+'
+    r'(\S+)[ \t]+(\S+)[ \t]+(\S+)[ \t]+([^\t]*)$',
+  );
 
   static String _text(String input) {
     if (input.length > maxLength) {
@@ -104,9 +108,16 @@ class CookieInput {
       final httpOnly = line.startsWith(_httpOnlyPrefix);
       if (httpOnly) line = line.substring(_httpOnlyPrefix.length);
       if (line.trim().isEmpty || line.startsWith('#')) continue;
-      final parts = line.split('\t');
+      var parts = line.split('\t');
+      if (parts.length < 7) {
+        // Copying an export can expand tabs to spaces. Keep the value intact.
+        final copied = _copiedColumnsPattern.firstMatch(line);
+        if (copied != null) {
+          parts = List.generate(7, (index) => copied.group(index + 1)!);
+        }
+      }
       if (parts.length != 7) {
-        throw FormatException('Cookie 文件第 ${i + 1} 行不是七列 Tab 分隔格式');
+        throw FormatException('Cookie 文件第 ${i + 1} 行不是七列 Tab 或空格分隔格式');
       }
       final storedDomain = parts[0].trim().toLowerCase();
       final domain = storedDomain.startsWith('.')

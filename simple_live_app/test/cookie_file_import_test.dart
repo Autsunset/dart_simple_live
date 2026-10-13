@@ -174,31 +174,76 @@ void main() {
     },
   );
 
-  testWidgets('Douyu dialog accepts the pasted seven-column export', (
-    tester,
-  ) async {
-    String? saved;
-    await tester.pumpWidget(
-      GetMaterialApp(
-        home: Scaffold(
-          body: TextButton(
-            onPressed: () async {
-              saved = await Get.dialog<String>(
-                const DouyuCookieDialog(initialValue: ''),
-              );
-            },
-            child: const Text('open'),
+  for (final separator in ['\t', '    ']) {
+    final format = separator == '\t' ? 'tab-separated' : 'space-separated';
+    testWidgets('Douyu dialog saves a pasted $format export', (tester) async {
+      String? saved;
+      await tester.pumpWidget(
+        GetMaterialApp(
+          home: Scaffold(
+            body: TextButton(
+              onPressed: () async {
+                saved = await Get.dialog<String>(
+                  const DouyuCookieDialog(initialValue: ''),
+                );
+              },
+              child: const Text('open'),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.tap(find.text('open'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextFormField), _douyu);
-    await tester.tap(find.text('保存'));
-    await tester.pumpAndSettle();
-    expect(saved, DouyuAccountService.normalizeCookie(_douyu));
-  });
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byType(TextFormField),
+        _douyu.replaceAll('\t', separator),
+      );
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(saved, DouyuAccountService.normalizeCookie(_douyu));
+      expect(find.byType(DouyuCookieDialog), findsNothing);
+    });
+
+    testWidgets('Douyu dialog imports and saves a $format TXT file', (
+      tester,
+    ) async {
+      String? saved;
+      picker.result = FilePickerResult([
+        _file(_douyu.replaceAll('\t', separator)),
+      ]);
+      await tester.pumpWidget(
+        GetMaterialApp(
+          home: Scaffold(
+            body: TextButton(
+              onPressed: () async {
+                saved = await Get.dialog<String>(
+                  const DouyuCookieDialog(initialValue: 'acf_did=old'),
+                );
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('导入 cookies.txt'));
+      await tester.tap(find.text('导入 cookies.txt'));
+      await tester.pumpAndSettle();
+      expect(find.text('文件已载入，点击保存后生效'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextFormField>(find.byType(TextFormField))
+            .controller!
+            .text,
+        DouyuAccountService.normalizeCookie(_douyu),
+      );
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(saved, DouyuAccountService.normalizeCookie(_douyu));
+      expect(find.byType(DouyuCookieDialog), findsNothing);
+    });
+  }
 
   testWidgets(
     'Douyin file picker imports valid data and rejects a Douyu file',

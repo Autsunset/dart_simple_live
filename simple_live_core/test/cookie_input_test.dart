@@ -60,6 +60,62 @@ void main() {
     },
   );
 
+  for (final separator in [' ', '    ']) {
+    test('accepts copied exports separated by ${separator.length} spaces', () {
+      const signed = r'token%2F%2B+raw==/$value';
+      final input = [
+        '\uFEFF# Netscape HTTP Cookie File',
+        '# Generated export',
+        '',
+        '.douyu.com\tTRUE\t/\tFALSE\t0\tdy_did\tparent-device',
+        'www.douyu.com\tFALSE\t/\tFALSE\t0\tacf_did\thost-device',
+        'www.douyu.com\tFALSE\t/\tFALSE\t0\tdy_did\thost-device',
+        '#HttpOnly_www.douyu.com\tFALSE\t/\tTRUE\t$future\tacf_auth\t$signed',
+        'www.douyu.com\tFALSE\t/\tFALSE\t0\tempty\t',
+        '.douyu.com\tTRUE\t/\tFALSE\t1\texpired\told-value',
+        '.douyin.com\tTRUE\t/\tTRUE\t0\tsessionid\tother-platform-secret',
+      ].join('\r\n').replaceAll('\t', separator);
+      final saved = CookieInput.normalizeForStorage(
+        input,
+        domain: 'douyu.com',
+        now: now,
+      );
+      expect(saved, contains('#HttpOnly_www.douyu.com\tFALSE\t/\tTRUE'));
+      expect(saved, isNot(contains('other-platform-secret')));
+      expect(saved, isNot(contains('old-value')));
+      expect(
+        CookieInput.headerFor(saved, api, now: now),
+        'dy_did=parent-device; acf_did=host-device; dy_did=host-device; '
+        'acf_auth=$signed; empty=',
+      );
+      expect(
+        CookieInput.headerFor(input, api, now: now),
+        CookieInput.headerFor(saved, api, now: now),
+      );
+      expect(
+        CookieInput.headerFor(
+          saved,
+          Uri.parse('http://m.douyu.com/'),
+          now: now,
+        ),
+        'dy_did=parent-device',
+      );
+    });
+  }
+
+  test('accepts headerless mixed separators without splitting cookie values', () {
+    const input =
+        'www.douyu.com\tFALSE    / FALSE\t0    acf_auth value with  spaces%2F+==';
+    expect(CookieInput.isNetscape(input), isTrue);
+    expect(
+      CookieInput.headerFor(input, api, now: now),
+      'acf_auth=value with  spaces%2F+==',
+    );
+    const spaced = 'WWW.DOUYU.COM false / true 0 acf_did device';
+    expect(CookieInput.isNetscape(spaced), isTrue);
+    expect(CookieInput.headerFor(spaced, api, now: now), 'acf_did=device');
+  });
+
   test(
     'enforces exact domains, subdomain flags, path boundaries and secure',
     () {
@@ -220,28 +276,31 @@ void main() {
     },
   );
 
-  test(
-    'rejects malformed records without exposing credentials in exceptions',
-    () {
-      for (final input in [
-        '.douyu.com TRUE / FALSE 0 acf_auth secret-value',
-        '$header.douyu.com\tTRUE\t/\tFALSE\t0\tmissing-value-column',
-        '$header.douyu.com\tTRUE\t/\tFALSE\tinvalid\tacf_auth\tsecret-value',
-        '$header.douyu.com\tTRUE\t/\tINVALID\t0\tacf_auth\tsecret-value',
-        '$header.douyu.com\tTRUE\t/\tFALSE\t0\tbad name\tsecret-value',
-        '$header.douyu.com\tTRUE\t/\tFALSE\t0\tacf_auth\tsecret-value; injected=1',
-        '$header.douyu.com\tTRUE\t/\tFALSE\t0\tacf_auth\tsecret-value\u0000',
-      ]) {
-        try {
-          CookieInput.normalizeForStorage(input, domain: 'douyu.com', now: now);
-          fail('Invalid file was accepted');
-        } on FormatException catch (error) {
-          expect(error.source, isNull);
-          expect(error.toString(), isNot(contains('secret-value')));
-        }
+  test('rejects malformed records without exposing credentials in exceptions', () {
+    for (final input in [
+      '.douyu.com TRUE / FALSE 0 missing-value-column',
+      '.douyu.com TRUE / FALSE invalid acf_auth secret-value',
+      '.douyu.com TRUE / INVALID 0 acf_auth secret-value',
+      '.douyu.com TRUE / FALSE 0 acf_auth secret-value; injected=1',
+      '.douyu.com TRUE / FALSE 0 acf_auth secret-value\u0000',
+      '$header.douyu.com\tTRUE\t/\tFALSE\t0\tmissing-value-column',
+      '$header.douyu.com\tTRUE\t/\tFALSE\t0\tacf_auth\tsecret-value\textra-column',
+      '$header.douyu.com\tTRUE\t/\t\tFALSE\t0\tacf_auth\tsecret-value',
+      '$header.douyu.com\tTRUE\t/\tFALSE\tinvalid\tacf_auth\tsecret-value',
+      '$header.douyu.com\tTRUE\t/\tINVALID\t0\tacf_auth\tsecret-value',
+      '$header.douyu.com\tTRUE\t/\tFALSE\t0\tbad name\tsecret-value',
+      '$header.douyu.com\tTRUE\t/\tFALSE\t0\tacf_auth\tsecret-value; injected=1',
+      '$header.douyu.com\tTRUE\t/\tFALSE\t0\tacf_auth\tsecret-value\u0000',
+    ]) {
+      try {
+        CookieInput.normalizeForStorage(input, domain: 'douyu.com', now: now);
+        fail('Invalid file was accepted');
+      } on FormatException catch (error) {
+        expect(error.source, isNull);
+        expect(error.toString(), isNot(contains('secret-value')));
       }
-    },
-  );
+    }
+  });
 
   test('oversized pasted input is rejected before parsing', () {
     expect(

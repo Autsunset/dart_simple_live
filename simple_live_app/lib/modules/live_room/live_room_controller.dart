@@ -116,10 +116,26 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   Timer? _retryTimer;
   int _lineRequestId = 0;
   bool _playbackReady = false;
+  static const maxPlaybackRecoveries = 2;
+  static const playbackRecoveryTimeout = Duration(seconds: 15);
+  static const playbackStableDuration = Duration(seconds: 30);
+  int _playbackRecoveryId = 0;
+  int _playbackRecoveryCount = 0;
+  bool _recoveringPlayback = false;
+  Duration? _lastPlaybackPosition;
+  Duration _stablePlaybackProgress = Duration.zero;
 
   void _cancelPlaybackRetry() {
     _retryTimer?.cancel();
     _retryTimer = null;
+  }
+
+  void _resetPlaybackRecovery({bool resetAttempts = true}) {
+    ++_playbackRecoveryId;
+    _recoveringPlayback = false;
+    _lastPlaybackPosition = null;
+    _stablePlaybackProgress = Duration.zero;
+    if (resetAttempts) _playbackRecoveryCount = 0;
   }
 
   static const chatFlushInterval = Duration(milliseconds: 150);
@@ -430,6 +446,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     if (roomClosed) return;
     _playbackReady = false;
     _cancelPlaybackRetry();
+    _resetPlaybackRecovery();
     ++_playUrlRequestId;
     final requestId = ++_roomRequestId;
     final requestedSite = site;
@@ -439,6 +456,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       loadError.value = false;
       error = null;
       errorStackTrace = null;
+      errorMsg.value = "";
       update();
       addSysMsg("正在读取直播间信息");
       final roomDetail = await requestedSite.liveSite.getRoomDetail(
@@ -565,6 +583,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   void getPlayUrl() async {
     _playbackReady = false;
     _cancelPlaybackRetry();
+    _resetPlaybackRecovery();
     final requestId = _roomRequestId;
     final playUrlRequestId = ++_playUrlRequestId;
     final roomDetail = detail.value;
@@ -612,11 +631,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
   }
 
-  void changePlayLine(int index) {
+  void changePlayLine(int index, {bool automatic = false}) {
     if (roomClosed || index < 0 || index >= playUrls.length) {
       return;
     }
     _cancelPlaybackRetry();
+    _resetPlaybackRecovery(resetAttempts: !automatic);
     ++_lineRequestId;
     currentLineIndex = index;
     //重置错误次数
@@ -625,10 +645,15 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   }
 
   Future<void> initPlaylist(int requestId, int playUrlRequestId) async {
-    if (playUrls.isEmpty ||
-        roomClosed ||
-        requestId != _roomRequestId ||
-        playUrlRequestId != _playUrlRequestId) {
+    final lineRequestId = _lineRequestId;
+    final recoveryId = _playbackRecoveryId;
+    bool isCurrent() =>
+        !roomClosed &&
+        requestId == _roomRequestId &&
+        playUrlRequestId == _playUrlRequestId &&
+        lineRequestId == _lineRequestId &&
+        recoveryId == _playbackRecoveryId;
+    if (playUrls.isEmpty || !isCurrent()) {
       return;
     }
     currentLineInfo.value = "线路${currentLineIndex + 1}";
@@ -643,20 +668,12 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
       return Media(finalUrl, httpHeaders: playHeaders);
     }).toList();
 
-    await runPlayerOperation(
-      () async {
-        await initializePlayer();
-        if (roomClosed ||
-            requestId != _roomRequestId ||
-            playUrlRequestId != _playUrlRequestId) {
-          return;
-        }
-        _playbackReady = true;
-        await player.open(Playlist(mediaList));
-      },
-      isCurrent: () =>
-          requestId == _roomRequestId && playUrlRequestId == _playUrlRequestId,
-    );
+    await runPlayerOperation(() async {
+      await initializePlayer();
+      if (!isCurrent()) return;
+      _playbackReady = true;
+      await player.open(Playlist(mediaList));
+    }, isCurrent: isCurrent);
   }
 
   void _updateReturnedQuality() {
@@ -718,17 +735,44 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
   @override
   void mediaError(String error) {
     super.mediaError(error);
-    _schedulePlaybackRetry(error: error);
+    _schedulePlaybackRetry();
   }
 
-  void _schedulePlaybackRetry({String? error}) {
+  @override
+  void mediaProgress(Duration position) {
     if (roomClosed ||
         !_playbackReady ||
+        _recoveringPlayback ||
+        _retryTimer != null) {
+      return;
+    }
+    final previous = _lastPlaybackPosition;
+    _lastPlaybackPosition = position;
+    if (previous == null ||
+        position < previous ||
+        position - previous > const Duration(seconds: 5)) {
+      _stablePlaybackProgress = Duration.zero;
+      return;
+    }
+    _stablePlaybackProgress += position - previous;
+    // Opening a stream is not proof that playback recovered.
+    if (_stablePlaybackProgress >= playbackStableDuration) {
+      mediaErrorRetryCount = 0;
+      _playbackRecoveryCount = 0;
+    }
+  }
+
+  void _schedulePlaybackRetry() {
+    if (roomClosed ||
+        !_playbackReady ||
+        _recoveringPlayback ||
         _retryTimer != null ||
         currentLineIndex < 0 ||
         currentLineIndex >= playUrls.length) {
       return;
     }
+    _lastPlaybackPosition = null;
+    _stablePlaybackProgress = Duration.zero;
     final requestId = _roomRequestId;
     final urlRequestId = _playUrlRequestId;
     final lineRequestId = _lineRequestId;
@@ -747,17 +791,104 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
         Log.d("播放中断，尝试第$mediaErrorRetryCount次刷新");
         unawaited(setPlayer());
       } else if (currentLineIndex + 1 < playUrls.length) {
-        changePlayLine(currentLineIndex + 1);
+        changePlayLine(currentLineIndex + 1, automatic: true);
       } else {
-        _playbackReady = false;
-        if (error == null) {
-          liveStatus.value = false;
-        } else {
-          errorMsg.value = "播放失败";
-          SmartDialog.showToast("播放失败:$error");
-        }
+        unawaited(_recoverPlayback());
       }
     });
+  }
+
+  void _playbackRecoveryFailed() {
+    _recoveringPlayback = false;
+    _playbackReady = false;
+    errorMsg.value = "播放中断，自动重连失败，请刷新重试";
+  }
+
+  Future<void> _recoverPlayback() async {
+    if (roomClosed) return;
+    if (_playbackRecoveryCount >= maxPlaybackRecoveries) {
+      _playbackRecoveryFailed();
+      return;
+    }
+    _recoveringPlayback = true;
+    _playbackRecoveryCount++;
+    final recoveryId = ++_playbackRecoveryId;
+    final requestId = _roomRequestId;
+    final urlRequestId = ++_playUrlRequestId;
+    final lineRequestId = _lineRequestId;
+    final requestedSite = site.liveSite;
+    final requestedRoomId = roomId;
+    final qualityIndex = currentQuality;
+    final qualityName = qualityIndex >= 0 && qualityIndex < qualites.length
+        ? qualites[qualityIndex].quality
+        : null;
+    bool isCurrent() =>
+        !roomClosed &&
+        recoveryId == _playbackRecoveryId &&
+        requestId == _roomRequestId &&
+        urlRequestId == _playUrlRequestId &&
+        lineRequestId == _lineRequestId;
+    errorMsg.value = "播放中断，正在重新连接…";
+    try {
+      final freshDetail = await requestedSite
+          .getRoomDetail(roomId: requestedRoomId)
+          .timeout(playbackRecoveryTimeout);
+      if (!isCurrent()) return;
+      detail.value = freshDetail;
+      online.value = freshDetail.online;
+      // EOF and transport errors do not establish whether a room is offline.
+      liveStatus.value = freshDetail.status || freshDetail.isRecord;
+      if (!liveStatus.value) {
+        _recoveringPlayback = false;
+        _playbackReady = false;
+        errorMsg.value = "";
+        _liveDurationTimer?.cancel();
+        liveDuration.value = '00:00:00';
+        return;
+      }
+      final freshQualities = await requestedSite
+          .getPlayQualites(detail: freshDetail)
+          .timeout(playbackRecoveryTimeout);
+      if (!isCurrent()) return;
+      if (freshQualities.isEmpty) throw StateError('No playback qualities');
+      final matching = freshQualities.indexWhere(
+        (q) => q.quality == qualityName,
+      );
+      final selected = matching >= 0
+          ? matching
+          : qualityIndex.clamp(0, freshQualities.length - 1);
+      final freshUrls = await requestedSite
+          .getPlayUrls(detail: freshDetail, quality: freshQualities[selected])
+          .timeout(playbackRecoveryTimeout);
+      if (!isCurrent()) return;
+      if (freshUrls.urls.isEmpty) throw StateError('No playback URLs');
+      qualites.value = freshQualities;
+      currentQuality = selected;
+      playUrls.value = freshUrls.urls;
+      playHeaders = freshUrls.headers;
+      _returnedQualities = freshUrls.qualities;
+      currentLineIndex = 0;
+      mediaErrorRetryCount = 0;
+      _lastPlaybackPosition = null;
+      _stablePlaybackProgress = Duration.zero;
+      // New-stream errors must be admitted, including errors during open().
+      _recoveringPlayback = false;
+      await initPlaylist(requestId, urlRequestId);
+    } catch (e, stackTrace) {
+      if (!isCurrent()) return;
+      Log.e("直播流重连失败 (${e.runtimeType})", stackTrace);
+      if (_playbackRecoveryCount >= maxPlaybackRecoveries) {
+        _playbackRecoveryFailed();
+        return;
+      }
+      _recoveringPlayback = true;
+      errorMsg.value = "重连暂时失败，稍后重试…";
+      _cancelPlaybackRetry();
+      _retryTimer = Timer(Duration(seconds: 2 * _playbackRecoveryCount), () {
+        _retryTimer = null;
+        if (isCurrent()) unawaited(_recoverPlayback());
+      });
+    }
   }
 
   /// 读取SC
@@ -1225,6 +1356,7 @@ class LiveRoomController extends PlayerController with WidgetsBindingObserver {
     }
     _playbackReady = false;
     _cancelPlaybackRetry();
+    _resetPlaybackRecovery();
 
     // Clear platform-specific data before any async stop/load can complete.
     detail.value = null;
@@ -1362,6 +1494,7 @@ $errorStackTrace''');
     playerClosing = true;
     _playbackReady = false;
     _cancelPlaybackRetry();
+    _resetPlaybackRecovery();
     ++_roomRequestId;
     ++_playUrlRequestId;
     WidgetsBinding.instance.removeObserver(this);

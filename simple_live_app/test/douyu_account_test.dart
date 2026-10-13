@@ -61,7 +61,7 @@ void main() {
   });
 
   test(
-    'Netscape storage survives restart without losing scopes or logging values',
+    'space-separated Netscape storage survives restart without losing scopes or logging values',
     () async {
       const file =
           '# Netscape HTTP Cookie File\n'
@@ -69,7 +69,7 @@ void main() {
           '#HttpOnly_www.douyu.com\tFALSE\t/\tTRUE\t0\tacf_auth\tfile-secret%2F+==\n'
           '.douyin.com\tTRUE\t/\tTRUE\t0\tsessionid\tother-secret\n';
       final account = Get.put(DouyuAccountService());
-      await account.setCookie(file);
+      await account.setCookie(file.replaceAll('\t', '    '));
       final saved = box.entries[LocalStorageService.kDouyuCookie] as String;
       expect(saved, startsWith('# Netscape HTTP Cookie File'));
       expect(saved, isNot(contains('other-secret')));

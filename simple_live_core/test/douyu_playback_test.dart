@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:simple_live_core/simple_live_core.dart';
+import 'package:simple_live_core/src/common/core_error.dart';
 import 'package:simple_live_core/src/common/http_client.dart';
 import 'package:simple_live_core/src/scripts/douyu_sign.dart';
 import 'package:test/test.dart';
@@ -97,6 +98,31 @@ class _SignerAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
+class _RoomAdapter implements HttpClientAdapter {
+  final Object? payload;
+  _RoomAdapter(this.payload);
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async => ResponseBody.fromString(
+    jsonEncode(
+      options.uri.path.startsWith('/betard/')
+          ? payload
+          : {'data': <String, dynamic>{}},
+    ),
+    200,
+    headers: {
+      Headers.contentTypeHeader: [Headers.jsonContentType],
+    },
+  );
+
+  @override
+  void close({bool force = false}) {}
+}
+
 void main() {
   late _Adapter adapter;
   late HttpClientAdapter original;
@@ -117,6 +143,81 @@ void main() {
     HttpClient.instance.dio.httpClientAdapter = adapter;
   });
   tearDown(() => HttpClient.instance.dio.httpClientAdapter = original);
+
+  for (final status in [1, '1', 2, '2']) {
+    test(
+      'room status $status (${status.runtimeType}) is parsed explicitly',
+      () async {
+        HttpClient.instance.dio.httpClientAdapter = _RoomAdapter({
+          'room': {
+            'room_id': '1',
+            'show_status': status,
+            'videoLoop': '0',
+            'room_biz_all': {'hot': 0},
+          },
+        });
+        final site = _Site();
+        final live = status.toString() == '1';
+        expect(await site.getLiveStatus(roomId: '1'), live);
+        expect((await site.getRoomDetail(roomId: '1')).status, live);
+      },
+    );
+  }
+
+  test(
+    'string-valued recording status remains playable but not live',
+    () async {
+      HttpClient.instance.dio.httpClientAdapter = _RoomAdapter({
+        'room': {
+          'room_id': '1',
+          'show_status': '1',
+          'videoLoop': '1',
+          'room_biz_all': {'hot': 0},
+        },
+      });
+      final site = _Site();
+      final room = await site.getRoomDetail(roomId: '1');
+      expect(room.status, isFalse);
+      expect(room.isRecord, isTrue);
+      expect(await site.getLiveStatus(roomId: '1'), isFalse);
+    },
+  );
+
+  test(
+    'missing or invalid status is an error, never an offline result',
+    () async {
+      for (final payload in [
+        null,
+        {'error': 503, 'msg': 'try again'},
+        {'room': null},
+        {'room': 'invalid'},
+        {'room': <String, dynamic>{}},
+        {
+          'room': {'show_status': null},
+        },
+        {
+          'room': {'show_status': 0},
+        },
+        {
+          'room': {'show_status': true},
+        },
+        {
+          'room': {'show_status': 'unavailable'},
+        },
+      ]) {
+        HttpClient.instance.dio.httpClientAdapter = _RoomAdapter(payload);
+        final site = _Site();
+        await expectLater(
+          site.getLiveStatus(roomId: '1'),
+          throwsA(isA<CoreError>()),
+        );
+        await expectLater(
+          site.getRoomDetail(roomId: '1'),
+          throwsA(isA<CoreError>()),
+        );
+      }
+    },
+  );
 
   test(
     'signing reads the playback device from Netscape instead of signing the file text',

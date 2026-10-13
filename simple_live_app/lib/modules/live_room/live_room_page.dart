@@ -248,20 +248,36 @@ class LiveRoomPage extends GetView<LiveRoomController> {
           // 自己实现
           wakelock: false,
         ),
-        Obx(
-          () => Visibility(
-            visible: !controller.liveStatus.value,
-            child: const Center(
-              child: Text(
-                "未开播",
-                style: TextStyle(fontSize: 16, color: Colors.white),
-              ),
-            ),
-          ),
-        ),
+        buildPlaybackStatus(),
       ],
     );
   }
+
+  Widget buildPlaybackStatus() => Obx(() {
+    if (controller.detail.value == null || controller.loadError.value) {
+      return const SizedBox.shrink();
+    }
+    final offline = !controller.liveStatus.value;
+    final message = controller.errorMsg.value;
+    if (!offline && message.isEmpty) return const SizedBox.shrink();
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            offline ? "未开播" : message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 16, color: Colors.white),
+          ),
+          if (!offline)
+            TextButton(
+              onPressed: controller.refreshRoom,
+              child: const Text("刷新重试"),
+            ),
+        ],
+      ),
+    );
+  });
 
   Widget buildUserProfile(BuildContext context) {
     return Container(
